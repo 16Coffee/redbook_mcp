@@ -1,19 +1,29 @@
+# macOS系统文件
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Python 虚拟环境
 venv/
 env/
 .venv/
 .env/
+ENV/
+env.bak/
+venv.bak/
 
 # Python 缓存文件
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
 
 # 分发/打包
-.Python
 build/
 develop-eggs/
 dist/
@@ -33,14 +43,69 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# IDE配置文件
-.vscode/
-.idea/
-*.swp
-*.swo
+# PyInstaller
+*.manifest
+*.spec
 
-# 日志文件
+# 单元测试 / 覆盖率报告
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# 翻译
+*.mo
+*.pot
+
+# Django stuff:
 *.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
 
 # 环境变量文件
 .env
@@ -48,7 +113,115 @@ MANIFEST
 .env.development
 .env.test
 .env.production
+.venv
 
-# 数据文件（根据需要调整）
-data/cache/
-data/temp/
+# spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# IDE配置文件
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# ===========================================
+# 项目特有文件和目录
+# ===========================================
+
+# 浏览器数据目录（包含用户登录信息，不应提交）
+browser_data/
+
+# 应用数据目录
+data/
+!data/.gitkeep
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 缓存文件
+cache/
+.cache/
+
+# 临时文件
+temp/
+tmp/
+*.tmp
+*.temp
+
+# 备份文件
+*.bak
+*.backup
+backup/
+*_backup/
+
+# 测试文件
+test_*.py
+*_test.py
+testing/
+tests/temp/
+
+# 配置文件备份
+config.bak
+config.backup
+
+# 用户上传的文件
+uploads/
+
+# 下载的文件
+downloads/
+
+# Playwright浏览器
+playwright-browsers/
+
+# 其他可能的数据文件
+*.db
+*.sqlite
+*.sqlite3
+
+# cookie和session文件
+cookies.txt
+cookies.json
+session.json
+
+# 敏感信息文件
+secrets.json
+credentials.json
+token.txt
+
+# 本地开发文件
+local_config.py
+dev_settings.py
+
+# AI学习资源目录（如果不需要版本控制）
+AI-learn-resource/
+
+# 错误报告
+error_*.txt
+crash_*.log

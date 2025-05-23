@@ -2,9 +2,15 @@
 
 <div align="right">
 
-[English](README_EN.md) | 中文
+[English](docs/README_EN.md) | 中文
 
 </div>
+
+## 📚 项目文档
+
+- **[📖 完整文档目录](docs/README.md)** - 查看所有项目文档
+- **[🔐 登录系统使用指南](docs/登录系统使用指南.md)** - 智能登录系统详细说明
+- **[💬 评论功能使用指南](docs/评论功能使用指南.md)** - 评论功能完整指南
 
 > 本项目基于 [JonaFly/RednoteMCP](https://github.com/JonaFly/RednoteMCP.git) 并结合多次实战经验，进行全面优化和功能扩展（by windsurf）。在此向原作者的贡献表示由衷的感谢！
 
@@ -13,24 +19,76 @@
 ## 主要特点与优势
 
 - **深度集成AI能力**：利用MCP客户端（如Claude）的大模型能力，生成更自然、更相关的评论内容
-- **模块化设计**：将功能分为笔记分析、评论生成和评论发布三个独立模块，提高代码可维护性
+- **模块化分层架构**：采用DDD领域驱动设计和清洁架构原则，提高代码可维护性和扩展性
 - **强大的内容获取能力**：集成多种获取笔记内容的方法，确保能完整获取各类笔记的标题、作者和正文内容
-- **持久化登录**：使用持久化浏览器上下文，首次登录后无需重复登录
+- **智能持久化登录**：使用持久化浏览器上下文，首次登录后无需重复登录，支持30天状态保持
 - **两步式评论流程**：先获取笔记分析结果，然后由MCP客户端生成并发布评论
+
+## 🏗️ 项目架构
+
+### 架构设计原则
+- **分层架构**：核心层、领域层、基础设施层、应用层、接口层
+- **领域驱动设计（DDD）**：以业务领域为核心组织代码
+- **高内聚、低耦合**：模块职责明确，依赖关系清晰
+- **便于扩展和维护**：新功能添加更加容易
+
+### 目录结构
+```
+redbook_mcp/
+├── src/                          # 🏗️ 分层架构源码
+│   ├── core/                    # 核心基础设施层
+│   │   ├── base/               # 基础工具类
+│   │   ├── config/             # 配置管理
+│   │   ├── logging/            # 日志系统
+│   │   └── exceptions/         # 异常定义
+│   ├── domain/                 # 领域层
+│   │   ├── models/             # 领域模型
+│   │   ├── services/           # 领域服务
+│   │   │   ├── notes.py        # 笔记服务
+│   │   │   ├── comments.py     # 评论服务
+│   │   │   └── publish.py      # 发布服务
+│   │   └── repositories/       # 仓储接口
+│   ├── infrastructure/         # 基础设施层
+│   │   ├── browser/            # 浏览器管理
+│   │   │   ├── browser.py      # 浏览器管理器
+│   │   │   └── login_manager.py # 登录状态管理
+│   │   ├── cache/              # 缓存实现
+│   │   └── storage/            # 存储实现
+│   ├── application/            # 应用层
+│   │   ├── use_cases/          # 用例实现
+│   │   └── dto/                # 数据传输对象
+│   └── interfaces/             # 接口层
+│       ├── mcp/                # MCP接口
+│       │   ├── server.py       # MCP服务器
+│       │   └── mcp_tools.py    # MCP工具
+│       └── cli/                # 命令行接口
+├── browser_data/               # 🔐 浏览器数据（持久化）
+├── data/                       # 📁 应用数据
+│   ├── login_state.json       # 登录状态文件
+│   ├── cookie_backups/        # Cookie备份
+│   └── logs/                  # 日志文件
+├── docs/                       # 📚 项目文档
+├── modules_backup/             # 🗂️ 旧架构备份
+├── main.py                     # 🚀 主入口文件
+└── requirements.txt            # 📦 依赖清单
+```
 
 ## 2.0版本主要优化
 
+- **架构重构**：从平铺式 `modules` 架构升级为分层的 `src` 架构，遵循DDD和清洁架构原则
 - **内容获取增强**：重构了笔记内容获取模块，增加页面加载等待时间和滚动操作，实现四种不同的内容获取方法
 - **AI评论生成**：重构评论功能，将笔记分析结果返回给MCP客户端，由客户端的AI能力生成更自然、更相关的评论
 - **功能模块化**：将功能分为笔记分析、评论生成和评论发布三个独立模块，提高代码可维护性
+- **登录系统优化**：实现智能登录状态管理，支持自动恢复、持久化存储和安全备份
 - **搜索结果优化**：解决了搜索笔记时标题不显示的问题，提供更完整的搜索结果
 - **错误处理增强**：添加更详细的错误处理和调试信息输出
 
 ## 一、核心功能
 
 ### 1. 用户认证与登录
-- **持久化登录**：支持手动扫码登录，首次登录后保存状态，后续使用无需重复扫码
-- **登录状态管理**：自动检测登录状态，并在需要时提示用户登录
+- **智能持久化登录**：支持手动扫码登录，首次登录后保存状态，后续使用无需重复扫码
+- **自动状态恢复**：其他功能自动检查并恢复登录状态，30天内无需重复登录
+- **安全机制**：Cookie自动备份，状态验证，频率限制保护
 
 ### 2. 内容发现与获取
 - **智能关键词搜索**：支持多关键词搜索，可指定返回结果数量，并提供完整的笔记信息
@@ -96,7 +154,7 @@
         "xiaohongshu MCP": {
             "command": "/绝对路径/到/venv/bin/python3",
             "args": [
-                "/绝对路径/到/xiaohongshu_mcp.py",
+                "/绝对路径/到/main.py",
                 "--stdio"
             ]
         }
@@ -112,7 +170,7 @@
         "xiaohongshu MCP": {
             "command": "C:\\Users\\username\\Desktop\\MCP\\Redbook-Search-Comment-MCP2.0\\venv\\Scripts\\python.exe",
             "args": [
-                "C:\\Users\\username\\Desktop\\MCP\\Redbook-Search-Comment-MCP2.0\\xiaohongshu_mcp.py",
+                "C:\\Users\\username\\Desktop\\MCP\\Redbook-Search-Comment-MCP2.0\\main.py",
                 "--stdio"
             ]
         }
@@ -124,8 +182,8 @@
 > - 请使用虚拟环境中Python解释器的**完整绝对路径**
 > - Mac示例：`/Users/username/Desktop/RedBook-Search-Comment-MCP/venv/bin/python3`
 > - Windows示例：`C:\Users\username\Desktop\MCP\Redbook-Search-Comment-MCP2.0\venv\Scripts\python.exe`
-> - 同样，xiaohongshu_mcp.py也需要使用**完整绝对路径**
-> - Windows路径中的反斜杠在JSON中需要双重转义（使用 `\`）
+> - 同样，main.py也需要使用**完整绝对路径**
+> - Windows路径中的反斜杠在JSON中需要双重转义（使用 `\\`）
 
 ### Python 命令区分（python 与 python3）
 
@@ -145,18 +203,28 @@
 
 在配置文件中，始终使用虚拟环境中 Python 解释器的**完整绝对路径**，而不是命令名称。
 
-## 四、使用方法
+## 四、启动方式
 
-### （一）启动服务器
+### 标准启动（推荐）
+```bash
+# 主入口启动
+python main.py
 
-1. **直接运行**：在项目目录下，激活虚拟环境后执行：
-   ```bash
-   python3 xiaohongshu_mcp.py
-   ```
+# 或指定模块启动
+python -m src.interfaces.mcp.server
+```
 
-2. **通过 MCP Client 启动**：配置好MCP Client后，按照客户端的操作流程进行启动和连接。
+### 开发模式
+```bash
+python -m src.interfaces.mcp.server --dev
+```
 
-### （二）主要功能操作
+### 通过 MCP Client 启动
+配置好MCP Client后，按照客户端的操作流程进行启动和连接。
+
+## 五、使用方法
+
+### （一）主要功能操作
 
 在MCP Client（如Claude for Desktop）中连接到服务器后，可以使用以下功能：
 
@@ -164,7 +232,7 @@
 
 **工具函数**：
 ```
-mcp0_login()
+mcp_xiaohongshu_MCP_login()
 ```
 
 **在MCP客户端中的使用方式**：
@@ -177,13 +245,13 @@ mcp0_login()
 请登录小红书
 ```
 
-**功能说明**：首次使用时会打开浏览器窗口，等待用户手动扫码登录。登录成功后，工具会保存登录状态。
+**功能说明**：首次使用时会打开浏览器窗口，等待用户手动扫码登录。登录成功后，工具会保存登录状态，30天内无需重复登录。
 
 ### 2. 搜索笔记
 
 **工具函数**：
 ```
-mcp0_search_notes(keywords="关键词", limit=5)
+mcp_xiaohongshu_MCP_search_notes(keywords="关键词", limit=5)
 ```
 
 **在MCP客户端中的使用方式**：
@@ -202,7 +270,7 @@ mcp0_search_notes(keywords="关键词", limit=5)
 
 **工具函数**：
 ```
-mcp0_get_note_content(url="笔记URL")
+mcp_xiaohongshu_MCP_get_note_content(url="笔记URL")
 ```
 
 **在MCP客户端中的使用方式**：
@@ -221,7 +289,7 @@ mcp0_get_note_content(url="笔记URL")
 
 **工具函数**：
 ```
-mcp0_get_note_comments(url="笔记URL")
+mcp_xiaohongshu_MCP_get_note_comments(url="笔记URL")
 ```
 
 **在MCP客户端中的使用方式**：
@@ -236,7 +304,7 @@ mcp0_get_note_comments(url="笔记URL")
 
 **工具函数**：
 ```
-mcp0_post_smart_comment(url="笔记URL", comment_type="评论类型")
+mcp_xiaohongshu_MCP_post_smart_comment(url="笔记URL", comment_type="评论类型")
 ```
 
 **在MCP客户端中的使用方式**：
@@ -251,7 +319,7 @@ mcp0_post_smart_comment(url="笔记URL", comment_type="评论类型")
 
 **工具函数**：
 ```
-mcp0_post_comment(url="笔记URL", comment="评论内容")
+mcp_xiaohongshu_MCP_post_comment(url="笔记URL", comment="评论内容")
 ```
 
 **在MCP客户端中的使用方式**：
@@ -263,26 +331,11 @@ mcp0_post_comment(url="笔记URL", comment="评论内容")
 
 **功能说明**：将指定的评论内容发布到笔记页面。
 
-### 7. 获取笔记评论
+### 7. 发布图文笔记
 
 **工具函数**：
 ```
-mcp0_get_note_comments(url="笔记URL")
-```
-
-**在MCP客户端中的使用方式**：
-发送包含获取评论的请求：
-```
-帮我获取这篇笔记的评论：https://www.xiaohongshu.com/xxxx
-```
-
-**功能说明**：获取指定笔记下的评论内容，包括评论者、评论文本和时间信息。
-
-### 8. 发布图文笔记
-
-**工具函数**：
-```
-mcp0_publish_note(title="笔记标题", content="笔记内容", image_paths=["图片路径1", "图片路径2"], topics=["话题1", "话题2"])
+mcp_xiaohongshu_MCP_publish_note(title="笔记标题", content="笔记内容", media_paths=["图片路径1", "图片路径2"], topics=["话题1", "话题2"])
 ```
 
 **在MCP客户端中的使用方式**：
@@ -299,10 +352,10 @@ mcp0_publish_note(title="笔记标题", content="笔记内容", image_paths=["�
 **参数说明**：
 - `title`：笔记标题，建议控制在30字以内
 - `content`：笔记正文内容
-- `image_paths`：图片本地路径列表，支持多张图片
+- `media_paths`：图片本地路径列表，支持多张图片
 - `topics`：话题标签列表（可选）
 
-## 四、使用指南
+## 六、使用指南
 
 ### 0. 工作原理
 
@@ -377,12 +430,7 @@ Claude: 评论已成功发布！
    - 定位并操作评论输入框
    - 发布评论并返回结果
 
-## 五、代码结构
-
-- **xiaohongshu_mcp.py**：实现主要功能的核心文件，包含登录、搜索、获取内容和评论、发布评论等功能的代码逻辑。
-- **requirements.txt**：记录项目所需的依赖库。
-
-## 六、常见问题与解决方案
+## 七、常见问题与解决方案
 
 1. **连接失败**：
    - 确保使用了虚拟环境中Python解释器的**完整绝对路径**
@@ -399,7 +447,7 @@ Claude: 评论已成功发布！
    - 确保在虚拟环境中安装了所有依赖
    - 检查是否安装了fastmcp包
 
-## 七、注意事项与问题解决
+## 八、注意事项与问题解决
 
 ### 1. 使用注意事项
 
@@ -440,6 +488,6 @@ mkdir -p /项目路径/browser_data
 2. **调整选择器**：如果您熟悉代码，可以尝试调整CSS选择器或XPath表达式
 3. **提交问题反馈**：向项目维护者提交问题，描述遇到的具体问题和页面变化
 
-## 八、免责声明
+## 九、免责声明
 
 本工具仅用于学习和研究目的，使用者应严格遵守相关法律法规以及小红书平台的规定。因使用不当导致的任何问题，本项目开发者不承担任何责任。

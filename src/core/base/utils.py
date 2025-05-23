@@ -1,9 +1,10 @@
 """
-通用工具函数模块，提供各种辅助功能
+工具函数模块，提供各种辅助功能
 """
 import re
 import json
-from modules.config import DOMAIN_KEYWORDS
+from typing import List, Dict, Any
+from src.core.config.config import DOMAIN_KEYWORDS
 
 def extract_text(text, prefix, suffix=None):
     """从文本中提取特定前缀和后缀之间的内容

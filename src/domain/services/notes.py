@@ -4,7 +4,7 @@
 import asyncio
 import json
 import re
-from modules.utils import extract_text, parse_note_content, detect_domain, extract_keywords
+from src.core.base.utils import extract_text, parse_note_content, detect_domain, extract_keywords
 
 
 class NoteManager:
@@ -59,7 +59,26 @@ class NoteManager:
                     
                     href = await link_element.get_attribute('href')
                     if href and '/search_result/' in href:
-                        full_url = f"https://www.xiaohongshu.com{href}"
+                        # 尝试从URL中提取笔记ID，并构造正确的explore URL
+                        import re
+                        
+                        # 提取笔记ID（通常在search_result/后面）
+                        note_id_match = re.search(r'/search_result/([a-f0-9]+)', href)
+                        if note_id_match:
+                            note_id = note_id_match.group(1)
+                            
+                            # 提取xsec_token参数
+                            xsec_token_match = re.search(r'xsec_token=([^&]+)', href)
+                            if xsec_token_match:
+                                xsec_token = xsec_token_match.group(1)
+                                # 构造explore格式的URL
+                                full_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source="
+                            else:
+                                # 如果没有xsec_token，使用原始URL
+                                full_url = f"https://www.xiaohongshu.com{href}"
+                        else:
+                            # 如果无法提取ID，使用原始URL
+                            full_url = f"https://www.xiaohongshu.com{href}"
                         
                         # 获取标题
                         title = await self._extract_card_title(card)
@@ -572,7 +591,7 @@ def sync_get_note_content(url: str) -> str:
     """
     同步封装 NoteManager 的异步 get_note_content，确保 MCP 返回值为纯字符串，避免序列化异常
     """
-    from modules.browser import BrowserManager
+    from src.infrastructure.browser.browser import BrowserManager
     browser_manager = BrowserManager()
     note_manager = NoteManager(browser_manager)
     loop = asyncio.get_event_loop()
@@ -595,7 +614,7 @@ def sync_get_note_comments(url: str) -> str:
     """
     同步封装 NoteManager 的异步 get_note_comments，确保 MCP 返回值为纯字符串，避免序列化异常
     """
-    from modules.browser import BrowserManager
+    from src.infrastructure.browser.browser import BrowserManager
     browser_manager = BrowserManager()
     note_manager = NoteManager(browser_manager)
     loop = asyncio.get_event_loop()
@@ -618,7 +637,7 @@ def sync_analyze_note(url: str) -> dict:
     """
     同步封装 NoteManager 的异步 analyze_note，确保 MCP 返回值格式正确
     """
-    from modules.browser import BrowserManager
+    from src.infrastructure.browser.browser import BrowserManager
     browser_manager = BrowserManager()
     note_manager = NoteManager(browser_manager)
     loop = asyncio.get_event_loop()
