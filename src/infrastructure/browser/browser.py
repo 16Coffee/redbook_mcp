@@ -770,7 +770,7 @@ class BrowserManager:
             # 仅访问首页检查登录状态
             if not self.main_page.url.startswith("https://www.xiaohongshu.com"):
                 await self.main_page.goto("https://www.xiaohongshu.com", timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(DEFAULT_WAIT_TIME)
+                await self.main_page.wait_for_selector('body', timeout=DEFAULT_TIMEOUT)  # Wait for homepage to be ready
             
             # 检查是否已登录
             login_elements = await self.main_page.query_selector_all('text="登录"')
@@ -824,7 +824,7 @@ class BrowserManager:
         for attempt in range(max_retries + 1):
             try:
                 await self.main_page.goto(url, timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(wait_time)  # 等待页面加载
+                await self.main_page.wait_for_load_state('domcontentloaded', timeout=DEFAULT_TIMEOUT)  # 等待页面加载
                 
                 # 检查是否出现登录弹窗或登录提示
                 await self._handle_login_popup()
@@ -893,7 +893,7 @@ class BrowserManager:
         
         try:
             await self.main_page.evaluate(script)
-            await asyncio.sleep(3)  # 等待滚动完成和内容加载
+            await self.main_page.wait_for_timeout(3000)  # 等待滚动完成和内容加载
         except Exception as e:
             logger.warning(f"执行滚动脚本失败: {str(e)}")
     

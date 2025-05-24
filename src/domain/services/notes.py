@@ -207,7 +207,7 @@ class NoteManager:
                     setTimeout(() => { window.scrollTo(0, 0); }, 2000);
                 }
             ''')
-            await asyncio.sleep(3)
+            await self.browser.main_page.wait_for_timeout(3000)
             
             # 获取笔记信息
             note_info = await self.browser.main_page.evaluate('''
@@ -299,12 +299,12 @@ class NoteManager:
                             }
                         ''', comment_section)
                         
-                        await asyncio.sleep(2)
+                        await self.browser.main_page.wait_for_selector('div.comment-item, div.commentItem', timeout=5000, state='attached')
                         
                         # 尝试点击评论区
                         try:
                             await comment_section.click()
-                            await asyncio.sleep(2)
+                            await self.browser.main_page.wait_for_timeout(2000)
                         except Exception:
                             pass
                         
@@ -316,7 +316,7 @@ class NoteManager:
             for i in range(8):
                 try:
                     await self.browser.main_page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(1)
+                    await self.browser.main_page.wait_for_timeout(1000)
                     
                     # 尝试点击"查看更多评论"按钮
                     more_comment_selectors = [
@@ -330,8 +330,9 @@ class NoteManager:
                         try:
                             more_btn = await self.browser.main_page.query_selector(selector)
                             if more_btn and await more_btn.is_visible():
+                                initial_comment_count = await self.browser.main_page.evaluate("document.querySelectorAll('.comment-item, .commentItem').length")
                                 await more_btn.click()
-                                await asyncio.sleep(2)
+                                await self.browser.main_page.wait_for_function(f"document.querySelectorAll('.comment-item, .commentItem').length > {initial_comment_count}", timeout=5000)
                         except Exception:
                             continue
                 except Exception:
