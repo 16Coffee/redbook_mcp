@@ -117,47 +117,79 @@ class NoteManager:
         Returns:
             str: 提取的标题
         """
-        # 方法1: 使用footer内的标题元素
-        title_element = await card.query_selector('div.footer a.title span')
-        if title_element:
-            title = await title_element.text_content()
-            if title and title.strip():
-                return title.strip()
-        
-        # 方法2: 直接获取标题元素
-        title_element = await card.query_selector('a.title span')
-        if title_element:
-            title = await title_element.text_content()
-            if title and title.strip():
-                return title.strip()
-        
-        # 方法3: 获取任何可能的文本内容
-        text_elements = await card.query_selector_all('span')
+        # More specific selectors first, ordered by likely precision
+        selectors_to_try = [
+            'a span.title-content',                 # Specific class within an anchor
+            'a div.title-content',                  # Specific class within an anchor (div variant)
+            'a[href*="/explore/"] span[class*="title"]', # Title-like span within an explore link
+            'div.note-card-title',                  # Common specific class for note titles
+            '.title span',                          # Generic title class with a span inside
+            'a.title',                              # Anchor with title class
+            'div.footer a.title span',              # Existing selector (kept as a fallback)
+            'span.note-title-text',                 # Another possible specific class for title text
+        ]
+
+        for selector in selectors_to_try:
+            title_element = await card.query_selector(selector)
+            if title_element:
+                title = await title_element.text_content()
+                if title and title.strip() and len(title.strip()) > 3: # Ensure title is somewhat substantial
+                    return title.strip()
+
+        # Fallback: Check common text containers if specific title classes fail
+        # Prioritize elements that are more likely to contain titles.
+        common_text_containers = await card.query_selector_all(
+            'a span, a div, h2, h3, p[class*="name"], p[class*="desc"]' # More targeted than just 'span'
+        )
         potential_titles = []
-        for text_el in text_elements:
+        for text_el in common_text_containers:
             text = await text_el.text_content()
-            if text and len(text.strip()) > 5:
+            if text and len(text.strip()) > 5: # Keep minimum length check
                 potential_titles.append(text.strip())
         
         if potential_titles:
-            # 选择最长的文本作为标题
+            # Choose the longest, most relevant-looking text
+            # Simple heuristic: longer is often better for titles.
             return max(potential_titles, key=len)
         
-        # 方法4: 使用JavaScript获取所有文本
+        # Optimized JavaScript fallback (if absolutely necessary)
+        # This is a last resort and should ideally be avoided by strong Python selectors.
         try:
-            all_text = await card.evaluate('''
-                el => Array.from(el.querySelectorAll("*"))
-                    .map(node => node.textContent)
-                    .filter(text => text && text.trim().length > 5)
+            js_title = await card.evaluate('''
+                el => {
+                    // Try specific, then less specific, common title patterns
+                    const selectors = [
+                        'a span.title-content', 'a div.title-content', // Specific structure
+                        '.note-card-title', '.title',                   // Common title classes
+                        'meta[property="og:title"]', 'meta[name="twitter:title"]', // Meta tags (less likely in card context)
+                        'h2', 'h3',                                     // Heading tags
+                        'a[href*="/explore/"] > div', 'a[href*="/explore/"] > span' // Direct children of links
+                    ];
+                    for (const selector of selectors) {
+                        const foundEl = el.querySelector(selector);
+                        if (foundEl && foundEl.textContent && foundEl.textContent.trim().length > 3) {
+                            return foundEl.textContent.trim();
+                        }
+                    }
+                    // Fallback to finding the longest text in common elements
+                    const candidates = Array.from(el.querySelectorAll('a, p, span, div'));
+                    let longestText = '';
+                    for (const cand of candidates) {
+                        const text = cand.textContent ? cand.textContent.trim() : '';
+                        if (text.length > longestText.length && text.length > 5) {
+                            longestText = text;
+                        }
+                    }
+                    return longestText || null;
+                }
             ''')
-            
-            if all_text and len(all_text) > 0:
-                return max(all_text, key=len)
-        except:
+            if js_title:
+                return js_title
+        except Exception as e:
+            # print(f"JavaScript fallback for title extraction failed: {e}") # Optional logging
             pass
         
-        # 如果所有方法都失败，返回默认标题
-        return "未知标题"
+        return "未知标题" # Default if all else fails
     
     async def _extract_images(self):
         """提取笔记图片
@@ -341,14 +373,19 @@ class NoteManager:
             # 获取评论
             comments = []
             
-            # 使用特定评论选择器
+            # 使用特定评论选择器 - Prioritized and expanded list
             comment_selectors = [
-                "div.comment-item", 
-                "div.commentItem",
-                "div.comment-content",
-                "div.comment-wrapper",
-                "section.comment",
-                "div.feed-comment"
+                "div.comment-item",             # Common class for a single comment
+                "div.commentItem",              # Alternative common class
+                ".comment-root",                # Root element of a comment
+                "div.normal-comment-item",      # Specific type of comment item
+                "div.sub-comment-item",         # For replies or sub-comments
+                "div.comment-content-container",# Container for the comment's actual content
+                "div.comment-wrapper",          # General wrapper
+                "section.comment",              # Semantic tag for comment
+                "div.feed-comment",             # Comments in a feed-like structure
+                # Fallback to less specific if above fail
+                "div[class*='comment']",        # Any div with 'comment' in its class
             ]
             
             for selector in comment_selectors:
@@ -356,50 +393,80 @@ class NoteManager:
                 if comment_elements and len(comment_elements) > 0:
                     for comment_element in comment_elements:
                         try:
-                            # 提取评论者名称
+                            # 提取评论者名称 - Prioritized and refined
                             username = "未知用户"
-                            username_selectors = ["span.user-name", "a.name", "div.username", "span.nickname", "a.user-nickname"]
+                            username_selectors = [
+                                "a.user-name",          # Anchor with user-name class (high priority)
+                                "span.user-name",       # Span with user-name class
+                                ".name",                # Generic .name class (often used for usernames)
+                                ".nick-name",           # Common alternative for nickname
+                                ".nickname",            # General nickname class
+                                "a[href*='/user/profile'] > span", # Username span directly under a profile link
+                                "div.user-info a",      # Username link within a user-info div
+                            ]
                             for username_selector in username_selectors:
                                 username_el = await comment_element.query_selector(username_selector)
                                 if username_el:
                                     username_text = await username_el.text_content()
-                                    username = username_text.strip()
-                                    break
+                                    if username_text and username_text.strip():
+                                        username = username_text.strip()
+                                        break
                             
-                            # 如果没有找到，尝试通过用户链接查找
+                            # 如果主要选择器未找到，尝试直接从用户链接（作为后备）
                             if username == "未知用户":
                                 user_link = await comment_element.query_selector('a[href*="/user/profile/"]')
                                 if user_link:
                                     username_text = await user_link.text_content()
-                                    username = username_text.strip()
+                                    if username_text and username_text.strip():
+                                        username = username_text.strip()
                             
-                            # 提取评论内容
+                            # 提取评论内容 - Prioritized and refined
                             content = "未知内容"
-                            content_selectors = ["div.content", "p.content", "div.text", "span.content", "div.comment-text"]
+                            content_selectors = [
+                                "span.comment-content", # Specific span for comment text
+                                "div.comment-text",     # Specific div for comment text
+                                "p.content-text",       # Paragraph for comment text
+                                "div.content",          # Generic content div
+                                "span.text",            # Generic text span
+                                "p.text",               # Generic text paragraph
+                            ]
                             for content_selector in content_selectors:
                                 content_el = await comment_element.query_selector(content_selector)
                                 if content_el:
                                     content_text = await content_el.text_content()
-                                    content = content_text.strip()
-                                    break
+                                    if content_text and content_text.strip(): # Ensure content is not just whitespace
+                                        content = content_text.strip()
+                                        break
                             
-                            # 如果没有找到内容，可能内容就在评论元素本身
-                            if content == "未知内容":
+                            # 如果没有找到内容，可能内容就在评论元素本身 (with refinement)
+                            if content == "未知内容" or len(content) < 2: # If content is too short or not found
                                 full_text = await comment_element.text_content()
-                                if username != "未知用户" and username in full_text:
-                                    content = full_text.replace(username, "").strip()
-                                else:
-                                    content = full_text.strip()
+                                if full_text:
+                                    full_text = full_text.strip()
+                                    # Avoid using full_text if it's identical to username or too short
+                                    if username != "未知用户" and username in full_text and len(full_text.replace(username, "").strip()) > 1:
+                                        content = full_text.replace(username, "").strip()
+                                    elif len(full_text) > 2 and full_text != username : # Only if it's meaningful
+                                        content = full_text
                             
-                            # 提取评论时间
+                            # 提取评论时间 - Prioritized and refined
                             time_location = "未知时间"
-                            time_selectors = ["span.time", "div.time", "span.date", "div.date", "time"]
+                            time_selectors = [
+                                "span.time",            # Generic time span
+                                "div.time",             # Generic time div
+                                "span.date",            # Generic date span
+                                "div.date",             # Generic date div
+                                "time.publish-time",    # Semantic time tag with specific class
+                                "span.publish-time",    # Span for publish time
+                                "span[class*='time']",  # Any span with 'time' in its class
+                            ]
                             for time_selector in time_selectors:
                                 time_el = await comment_element.query_selector(time_selector)
                                 if time_el:
                                     time_text = await time_el.text_content()
-                                    time_location = time_text.strip()
-                                    break
+                                    if time_text and time_text.strip():
+                                        time_location = time_text.strip()
+                                        break
                             
                             # 如果内容有足够长度且找到用户名，添加评论
                             if username != "未知用户" and content != "未知内容" and len(content) > 2:
@@ -422,25 +489,35 @@ class NoteManager:
                         () => {
                             const comments = [];
                             
-                            // 尝试查找评论区域
+                            // 尝试查找评论区域 - Mirroring Python's prioritized list
                             const commentContainers = document.querySelectorAll(
-                                '.comment-item, .commentItem, .comment-content, .comment-wrapper, section.comment, .feed-comment'
+                                'div.comment-item, div.commentItem, .comment-root, div.normal-comment-item, div.sub-comment-item, div.comment-content-container, div.comment-wrapper, section.comment, div.feed-comment, div[class*="comment"]'
                             );
                             
                             for (const container of commentContainers) {
-                                // 尝试获取用户名
+                                // 尝试获取用户名 - Mirroring Python's prioritized list
                                 let username = "未知用户";
-                                const usernameEl = container.querySelector('.user-nickname, .nickname, .user-name, a.name, .username');
-                                if (usernameEl) {
-                                    username = usernameEl.textContent.trim();
+                                const usernameSelectors = ["a.user-name", "span.user-name", ".name", ".nick-name", ".nickname", "a[href*='/user/profile'] > span", "div.user-info a"];
+                                for (const sel of usernameSelectors) {
+                                    const usernameEl = container.querySelector(sel);
+                                    if (usernameEl && usernameEl.textContent && usernameEl.textContent.trim()) {
+                                        username = usernameEl.textContent.trim();
+                                        break;
+                                    }
                                 }
                                 
-                                // 尝试获取评论内容
+                                // 尝试获取评论内容 - Mirroring Python's prioritized list
                                 let content = "未知内容";
-                                const contentEl = container.querySelector('.content, .text, .comment-text');
-                                if (contentEl) {
-                                    content = contentEl.textContent.trim();
-                                } else {
+                                const contentSelectors = ["span.comment-content", "div.comment-text", "p.content-text", "div.content", "span.text", "p.text"];
+                                for (const sel of contentSelectors) {
+                                    const contentEl = container.querySelector(sel);
+                                    if (contentEl && contentEl.textContent && contentEl.textContent.trim()) {
+                                        content = contentEl.textContent.trim();
+                                        break;
+                                    }
+                                }
+                                
+                                if (content === "未知内容" || content.length < 2) { // Fallback if specific content not found
                                     // 如果找不到明确的内容元素，尝试获取整个评论容器的文本
                                     const fullText = container.textContent.trim();
                                     if (username !== "未知用户" && fullText.includes(username)) {
@@ -450,11 +527,15 @@ class NoteManager:
                                     }
                                 }
                                 
-                                // 尝试获取时间
+                                // 尝试获取时间 - Mirroring Python's prioritized list
                                 let time = "未知时间";
-                                const timeEl = container.querySelector('.time, .date, time');
-                                if (timeEl) {
-                                    time = timeEl.textContent.trim();
+                                const timeSelectors = ["span.time", "div.time", "span.date", "div.date", "time.publish-time", "span.publish-time", "span[class*='time']"];
+                                for (const sel of timeSelectors) {
+                                    const timeEl = container.querySelector(sel);
+                                    if (timeEl && timeEl.textContent && timeEl.textContent.trim()) {
+                                        time = timeEl.textContent.trim();
+                                        break;
+                                    }
                                 }
                                 
                                 if (username !== "未知用户" && content !== "未知内容" && content.length > 2) {
@@ -470,60 +551,60 @@ class NoteManager:
                         }
                     ''')
                     
-                    # 将JavaScript结果添加到评论列表
-                    for comment in js_comments:
-                        comments.append({
-                            "用户名": comment.get("username", "未知用户"),
-                            "内容": comment.get("content", "未知内容"),
-                            "时间": comment.get("time", "未知时间")
-                        })
-                except Exception:
+                    if js_comments: # Check if js_comments is not None
+                        # 将JavaScript结果添加到评论列表
+                        for comment_data in js_comments:
+                            comments.append({
+                                "用户名": comment_data.get("username", "未知用户"),
+                                "内容": comment_data.get("content", "未知内容"),
+                                "时间": comment_data.get("time", "未知时间")
+                            })
+                except Exception as e:
+                    # print(f"JS comment extraction failed: {e}") # Optional logging
                     pass
             
-            # 如果还是没有找到评论，尝试通过用户链接方式查找
+            # Fallback to user links: This is a very broad approach and should be a last resort.
+            # It's kept for now but ideally, the above methods should capture comments.
             if not comments:
                 try:
-                    # 获取所有用户名元素
-                    user_links = await self.browser.main_page.query_selector_all('a[href*="/user/profile/"]')
+                    user_links = await self.browser.main_page.query_selector_all(
+                        'div[class*="comment"] a[href*="/user/profile/"]' # Make user link search more contextual to comments
+                    )
                     
                     for user_link in user_links:
                         try:
-                            username = await user_link.text_content()
-                            username = username.strip()
+                            username_text_el = await user_link.query_selector("span, div") # Prefer text inside a span/div in the link
+                            username = await (username_text_el.text_content() if username_text_el else user_link.text_content())
+                            username = username.strip() if username else "未知用户"
+
+                            if username == "未知用户" or not username: continue
+
+                            # Try to find comment content near this user link
+                            # This is heuristic and might need adjustment based on actual DOM
+                            comment_container_candidate = await user_link.query_selector("xpath=ancestor::div[contains(@class, 'comment-item') or contains(@class, 'commentItem') or contains(@class, 'comment-wrapper')][1]")
                             
-                            # 尝试获取评论内容
-                            content = await self.browser.main_page.evaluate('''
-                                (usernameElement) => {
-                                    const parent = usernameElement.parentElement;
-                                    if (!parent) return null;
-                                    
-                                    // 尝试获取同级的下一个元素
-                                    let sibling = usernameElement.nextElementSibling;
-                                    while (sibling) {
-                                        const text = sibling.textContent.trim();
-                                        if (text) return text;
-                                        sibling = sibling.nextElementSibling;
-                                    }
-                                    
-                                    // 尝试获取父元素的文本，并过滤掉用户名
-                                    const allText = parent.textContent.trim();
-                                    if (allText && allText.includes(usernameElement.textContent.trim())) {
-                                        return allText.replace(usernameElement.textContent.trim(), '').trim();
-                                    }
-                                    
-                                    return null;
-                                }
-                            ''', user_link)
-                            
-                            if username and content:
+                            content = "未知内容"
+                            if comment_container_candidate:
+                                content_el = await comment_container_candidate.query_selector("span.comment-content, div.comment-text, p.content-text, div.content")
+                                if content_el:
+                                    content = (await content_el.text_content() or "").strip()
+                                else: # Fallback to text_content of the container, excluding username
+                                    full_container_text = (await comment_container_candidate.text_content() or "").strip()
+                                    if username in full_container_text:
+                                        content = full_container_text.replace(username, "").strip()
+                                    else:
+                                        content = full_container_text # Might be imperfect
+
+                            if username and content and len(content) > 2:
                                 comments.append({
                                     "用户名": username,
                                     "内容": content,
-                                    "时间": "未知时间"
+                                    "时间": "未知时间" # Time is hard to get reliably at this stage
                                 })
                         except Exception:
                             continue
-                except Exception:
+                except Exception as e:
+                    # print(f"User link based comment extraction failed: {e}") # Optional logging
                     pass
             
             # 格式化返回结果

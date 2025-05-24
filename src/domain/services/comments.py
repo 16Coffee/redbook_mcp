@@ -26,15 +26,27 @@ class CommentManager:
         """
         print("开始查找评论输入框...")
         
-        # 修复选择器，使用更通用的方式
+        # Optimized and prioritized selectors for the comment input field
         input_selectors = [
-            '[contenteditable="true"]',  # 不限制标签类型
+            'textarea[placeholder*="说点什么"]',        # Specific placeholder on textarea
+            'textarea[placeholder*="友善评论"]',        # Another common placeholder
+            'textarea[placeholder*="发条评论"]',        # Yet another placeholder
+            'textarea[aria-label*="评论"]',            # ARIA label for accessibility
+            'textarea[data-testid="comment-input"]',  # Test ID if available
+            'div[contenteditable="true"][aria-label*="评论"]', # ARIA label on a contenteditable div
+            'div[contenteditable="true"][data-placeholder*="评论"]', # Common pattern for custom inputs
+            'div[contenteditable="true"][data-placeholder*="说点什么"]',
+            '.comment-input-area textarea',            # Textarea within a specific comment input area class
+            '.comment-input-area div[contenteditable="true"]', # Editable div in a specific area
+            # Original generic selectors, now with lower priority
+            '[contenteditable="true"]',
             'div[contenteditable="true"]',
             'p[contenteditable="true"]',
             'span[contenteditable="true"]',
-            'paragraph:has-text("说点什么...")',
+            # Original text selectors, also lower priority
             'text="说点什么..."',
-            'text="评论发布后所有人都能看到"'
+            'text="评论发布后所有人都能看到"',
+            'paragraph:has-text("说点什么...")', # Less common, kept as a low priority fallback
         ]
         
         # 尝试常规选择器
@@ -59,31 +71,59 @@ class CommentManager:
             js_element = await self.browser.main_page.evaluate('''
                 () => {
                     console.log("开始JavaScript查找...");
-                    
-                    // 查找可编辑元素
-                    const editableElements = Array.from(document.querySelectorAll('[contenteditable="true"]'));
-                    console.log("找到可编辑元素:", editableElements.length);
-                    
-                    if (editableElements.length > 0) {
-                        const element = editableElements[0];
-                        element.scrollIntoView();
-                        
-                        // 给元素添加一个临时ID，方便playwright查找
-                        element.setAttribute('data-comment-input', 'temp-id');
-                        console.log("已标记第一个可编辑元素");
-                        return true;
+                    let targetElement = null;
+
+                    // Priority 1: Specific textarea and contenteditable divs with known attributes
+                    const specificSelectors = [
+                        'textarea[placeholder*="说点什么"]',
+                        'textarea[placeholder*="友善评论"]',
+                        'textarea[aria-label*="评论"]',
+                        'div[contenteditable="true"][aria-label*="评论"]',
+                        'div[contenteditable="true"][data-placeholder*="评论"]',
+                        '.comment-input-area textarea',
+                        '.comment-input-area div[contenteditable="true"]'
+                    ];
+                    for (const selector of specificSelectors) {
+                        targetElement = document.querySelector(selector);
+                        if (targetElement) break;
                     }
-                    
-                    // 查找包含"说点什么"的元素
-                    const placeholderElements = Array.from(document.querySelectorAll('*'))
-                        .filter(el => el.textContent && el.textContent.includes('说点什么'));
-                    console.log("找到包含'说点什么'的元素:", placeholderElements.length);
-                    
-                    if (placeholderElements.length > 0) {
-                        const element = placeholderElements[0];
-                        element.scrollIntoView();
-                        element.setAttribute('data-comment-input', 'temp-id');
-                        console.log("已标记包含说点什么的元素");
+                    console.log("JS Specific selectors - Element found:", targetElement);
+
+                    // Priority 2: General contenteditable elements if specific ones fail
+                    if (!targetElement) {
+                        const editableElements = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+                        console.log("JS Found contenteditable elements:", editableElements.length);
+                        if (editableElements.length > 0) {
+                            // Prefer visible elements or those with placeholder-like text
+                            targetElement = editableElements.find(el => 
+                                (el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0) &&
+                                (el.getAttribute('data-placeholder') || el.textContent.length < 100) // Avoid large content blocks
+                            ) || editableElements[0];
+                        }
+                    }
+                    console.log("JS Contenteditable fallback - Element found:", targetElement);
+
+                    // Priority 3: Elements with placeholder-like text content (more restricted query)
+                    if (!targetElement) {
+                        const commonParents = document.querySelectorAll('.comment-form, .comment-box, .reply-box, form'); // Search within common form/comment areas
+                        let placeholderElements = [];
+                        (commonParents.length ? Array.from(commonParents) : [document]).forEach(parent => {
+                           placeholderElements.push(...Array.from(parent.querySelectorAll('div, span, p'))
+                                .filter(el => el.textContent && (el.textContent.includes('说点什么') || el.textContent.includes('评论')) && el.children.length === 0));
+                        });
+                        console.log("JS Found elements with placeholder text:", placeholderElements.length);
+                        if (placeholderElements.length > 0) {
+                            targetElement = placeholderElements.find(el => 
+                                (el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0)
+                            ) || placeholderElements[0];
+                        }
+                    }
+                    console.log("JS Placeholder text fallback - Element found:", targetElement);
+
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ block: 'center' });
+                        targetElement.setAttribute('data-comment-input', 'temp-id');
+                        console.log("已标记元素 for Playwright: ", targetElement);
                         return true;
                     }
                     
@@ -93,7 +133,7 @@ class CommentManager:
             
             if js_element:
                 print("JavaScript成功标记了元素，使用临时ID查找...")
-                await asyncio.sleep(0.5)
+                await self.browser.main_page.wait_for_selector('[data-comment-input="temp-id"]', state='attached', timeout=1000)
                 
                 # 使用临时ID查找元素
                 element = await self.browser.main_page.query_selector('[data-comment-input="temp-id"]')
@@ -122,20 +162,39 @@ class CommentManager:
         try:
             # 输入评论内容
             await comment_input.click()
-            await asyncio.sleep(1)
+            await comment_input.wait_for_element_state('editable', timeout=1000)
             await self.browser.main_page.keyboard.type(comment_text)
-            await asyncio.sleep(1)
+            await self.browser.main_page.wait_for_timeout(500)
             
             # 发送评论（简化发送逻辑）
             send_success = False
             
-            # 方法1: 尝试点击发送按钮
+            # 方法1: 尝试点击发送按钮 - Prioritized selectors
             try:
-                send_button = await self.browser.main_page.query_selector('button:has-text("发送")')
-                if send_button and await send_button.is_visible():
-                    print("找到发送按钮，点击发送")
+                # Prioritized list of selectors for the send button
+                send_button_selectors = [
+                    'button[data-testid="comment-send-button"]', # Ideal: a specific test ID
+                    'button.comment-send-btn',                   # Ideal: a specific class
+                    'button.css-xxxxxxxx',                       # Placeholder for an observed stable but obfuscated class
+                    'button[aria-label*="发送评论"]',             # ARIA label for accessibility
+                    'button[aria-label*="发布评论"]',             # Alternative ARIA label
+                    'button.submit-btn',                         # Common class for submit buttons
+                    'button[type="submit"]',                     # Standard submit button attribute
+                    'button:has-text("发送")',                   # Original text-based selector (fallback)
+                    'button:has-text("发布")',                   # Alternative text
+                ]
+                send_button = None
+                for selector in send_button_selectors:
+                    button = await self.browser.main_page.query_selector(selector)
+                    if button and await button.is_visible():
+                        send_button = button
+                        print(f"找到发送按钮，使用选择器: {selector}")
+                        break
+                
+                if send_button: # If any of the selectors found a visible button
+                    print("点击发送按钮")
                     await send_button.click()
-                    await asyncio.sleep(2)
+                    await self.browser.main_page.wait_for_timeout(2000)
                     send_success = True
             except Exception:
                 pass
@@ -145,7 +204,7 @@ class CommentManager:
                 try:
                     print("尝试使用Enter键发送")
                     await self.browser.main_page.keyboard.press("Enter")
-                    await asyncio.sleep(2)
+                    await self.browser.main_page.wait_for_timeout(2000)
                     send_success = True
                 except Exception:
                     pass
@@ -153,23 +212,47 @@ class CommentManager:
             # 方法3: 如果方法2失败，尝试使用JavaScript点击发送按钮
             if not send_success:
                 try:
-                    print("使用JavaScript查找发送按钮")
+                    print("使用JavaScript查找并点击发送按钮")
                     js_send_result = await self.browser.main_page.evaluate('''
                         () => {
-                            const sendButtons = Array.from(document.querySelectorAll('button'))
-                                .filter(btn => btn.textContent && btn.textContent.includes('发送'));
-                            if (sendButtons.length > 0) {
-                                sendButtons[0].click();
-                                console.log('JavaScript点击发送按钮');
+                            const selectors = [
+                                'button[data-testid="comment-send-button"]',
+                                'button.comment-send-btn',
+                                'button.css-xxxxxxxx', // Placeholder from Python list
+                                'button[aria-label*="发送评论"]',
+                                'button[aria-label*="发布评论"]',
+                                'button.submit-btn',
+                                'button[type="submit"]'
+                            ];
+                            let sendButton = null;
+                            for (const selector of selectors) {
+                                sendButton = document.querySelector(selector);
+                                if (sendButton && sendButton.offsetParent !== null) break; // Check for visibility
+                            }
+
+                            if (!sendButton) { // Fallback to text content if specific selectors fail
+                                const allButtons = Array.from(document.querySelectorAll('button'));
+                                sendButton = allButtons.find(btn => 
+                                    btn.textContent && 
+                                    (btn.textContent.trim() === '发送' || btn.textContent.trim() === '发布') &&
+                                    btn.offsetParent !== null // Check for visibility
+                                );
+                            }
+                            
+                            if (sendButton) {
+                                sendButton.click();
+                                console.log('JavaScript点击发送按钮:', sendButton);
                                 return true;
                             }
+                            console.log('JavaScript未能找到发送按钮');
                             return false;
                         }
                     ''')
-                    await asyncio.sleep(2)
+                    await self.browser.main_page.wait_for_timeout(2000) # Give time for action to complete
                     send_success = js_send_result
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"JavaScript查找发送按钮出错: {e}")
+                    pass # Keep original behavior of trying next method if JS fails
             
             return send_success
             
@@ -202,8 +285,8 @@ class CommentManager:
             # 访问页面
             print("正在访问页面...")
             await self.browser.main_page.goto(url, timeout=30000)
-            print("页面加载完成，等待2秒...")
-            await asyncio.sleep(2)
+            print("页面加载完成，等待评论区加载...")
+            await self.browser.main_page.wait_for_selector('div[contenteditable="true"], textarea[placeholder*="评论"], input[placeholder*="评论"]', state='visible', timeout=10000)
             
             # 直接查找评论输入框
             print("直接查找评论输入框...")
@@ -212,7 +295,7 @@ class CommentManager:
             if not comment_input:
                 print("第一次未找到输入框，尝试滚动到底部再查找...")
                 await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-                await asyncio.sleep(1)
+                await self.browser.main_page.wait_for_timeout(1000)
                 comment_input = await self.find_comment_input()
             
             if not comment_input:

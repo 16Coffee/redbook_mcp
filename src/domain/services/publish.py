@@ -72,7 +72,7 @@ class PublishManager:
                     video_tab = await self.browser.main_page.query_selector('text="上传视频"')
                     if video_tab:
                         await video_tab.click()
-                        await asyncio.sleep(3)
+                        await self.browser.main_page.wait_for_selector('div[class*="upload-window"], div[class*="video-upload-area"]', state='visible', timeout=5000)
                         print("已切换到视频模式")
                     else:
                         # 尝试其他视频相关的选择器
@@ -86,7 +86,7 @@ class PublishManager:
                             video_tab = await self.browser.main_page.query_selector(selector)
                             if video_tab:
                                 await video_tab.click()
-                                await asyncio.sleep(3)
+                                await self.browser.main_page.wait_for_selector('div[class*="upload-window"], div[class*="video-upload-area"]', state='visible', timeout=5000)
                                 print(f"使用选择器 {selector} 切换到视频模式")
                                 break
                 except Exception as e:
@@ -102,7 +102,7 @@ class PublishManager:
                     text_tab = await self.browser.main_page.query_selector('text="上传图文"')
                     if text_tab:
                         await text_tab.click()
-                        await asyncio.sleep(2)
+                        await self.browser.main_page.wait_for_selector('div[class*="upload-window"], input[type="file"]', state='visible', timeout=5000)
                         print("已切换到图文模式")
                 except Exception as e:
                     print(f"切换到图文模式时出错: {str(e)}")
@@ -113,23 +113,58 @@ class PublishManager:
             
             # 输入标题
             try:
-                title_input = await self.browser.main_page.query_selector('input[placeholder*="标题"], textarea[placeholder*="标题"]')
+                title_selectors = [
+                    'input[data-testid="note-title-input"]',
+                    'textarea[data-testid="note-title-input"]',
+                    'input[name="title"]',
+                    '#xhs-note-title-input',
+                    'input.note-title-field',
+                    'input[aria-label*="标题"]',
+                    'textarea[aria-label*="标题"]',
+                    'input[placeholder*="标题"]',
+                    'textarea[placeholder*="标题"]',
+                ]
+                title_input = None
+                for selector in title_selectors:
+                    title_input = await self.browser.main_page.query_selector(selector)
+                    if title_input:
+                        print(f"Found title input with selector: {selector}")
+                        break
+                
                 if title_input:
                     await title_input.fill(title)
-                    await asyncio.sleep(1)
+                    await self.browser.main_page.wait_for_timeout(500)
             except Exception as e:
                 print(f"输入标题时出错: {str(e)}")
             
             # 输入正文内容（支持#话题自动标签化）
             try:
-                content_input = await self.browser.main_page.query_selector('div[contenteditable="true"], textarea[placeholder*="输入正文"], [role="textbox"]')
+                content_selectors = [
+                    'div.ProseMirror[contenteditable="true"]',
+                    'div[data-testid="note-content-editor"][contenteditable="true"]',
+                    '#xhs-note-content-editor[contenteditable="true"]',
+                    'div.note-content-editor-class[contenteditable="true"]',
+                    'textarea[data-testid="note-content-textarea"]',
+                    'textarea[placeholder*="输入正文"][aria-label*="正文"]',
+                    'div[contenteditable="true"][aria-label*="正文"]',
+                    'textarea[placeholder*="输入正文"]',
+                    'div[contenteditable="true"]:not([aria-label*="标题"])',
+                    '[role="textbox"]:not(input)',
+                ]
+                content_input = None
+                for selector in content_selectors:
+                    content_input = await self.browser.main_page.query_selector(selector)
+                    if content_input:
+                        print(f"Found content input with selector: {selector}")
+                        break
+
                 if content_input:
                     await content_input.click()
-                    await asyncio.sleep(0.5)
+                    await content_input.wait_for_element_state('editable', timeout=1000)
                     
                     # 输入基础内容
                     await content_input.type(content)
-                    await asyncio.sleep(0.5)
+                    await self.browser.main_page.wait_for_timeout(500)
                     
                     # 添加话题标签（在内容末尾）
                     if topics and len(topics) > 0:
@@ -140,30 +175,26 @@ class PublishManager:
                             topic_text = f"#{topic}"
                             print(f"输入话题标签: {topic_text}")
                             await content_input.type(topic_text)
-                            await asyncio.sleep(2)  # 等待下拉建议出现
+                            await self.browser.main_page.wait_for_selector('div[class*="topic-suggestion"], div[class*="el-autocomplete-suggestion"] li', state='visible', timeout=3000)  # 等待下拉建议出现
                             
                             # 等待并查找话题下拉建议列表
                             print("等待话题下拉建议出现...")
                             suggestion_clicked = False
                             
-                            # 尝试多种选择器来找到下拉建议
+                            # Optimized and prioritized selectors for topic suggestion items
                             suggestion_selectors = [
-                                # 基于截图中的结构，话题建议可能在这些容器中
-                                'div[class*="topic"] div[class*="item"]:first-child',
-                                'div[class*="suggestion"] div[class*="item"]:first-child',
-                                '.topic-suggestion-list .topic-item:first-child',
-                                '.suggestion-dropdown .suggestion-item:first-child',
-                                # Element UI 相关选择器
-                                '.el-select-dropdown__item:first-child',
-                                '.el-autocomplete-suggestion__list li:first-child',
-                                '.el-autocomplete-suggestion li:first-child',
-                                # 通用的下拉列表选择器
-                                'ul li:first-child',
-                                'div[role="option"]:first-child',
-                                'li[role="option"]:first-child',
-                                # 可能的话题容器
-                                '.topic-dropdown .topic-option:first-child',
-                                '.hashtag-dropdown .hashtag-option:first-child'
+                                # Ideal: Specific test ID or unique class for a suggestion item
+                                'li[data-testid="topic-suggestion-item"]', 
+                                'div.xhs-topic-suggestion-item span.topic-name', # Hypothetical specific structure
+                                # Common patterns for suggestion lists (e.g., if using Element UI or similar)
+                                '.el-autocomplete-suggestion__list li:has-text("#"):first-child',
+                                'ul.topic-suggestion-list li.topic-item:has-text("#"):first-child',
+                                # Generic role-based selectors if specific classes are unknown
+                                'div[role="listbox"] li[role="option"]:has-text("#"):first-child',
+                                'div[role="listbox"] div[role="option"]:has-text("#"):first-child',
+                                # Fallback to broader class matches (less ideal)
+                                'div[class*="suggestion-item"]:has-text("#"):first-child',
+                                'li[class*="topic-item"]:has-text("#"):first-child',
                             ]
                             
                             # 尝试每个选择器
@@ -180,7 +211,7 @@ class PublishManager:
                                             print(f"建议项文本: {suggestion_text}")
                                             
                                             await suggestion.click()
-                                            await asyncio.sleep(1)
+                                            await self.browser.main_page.wait_for_timeout(1000)
                                             suggestion_clicked = True
                                             print(f"成功点击话题建议: {suggestion_text}")
                                             break
@@ -192,46 +223,48 @@ class PublishManager:
                             if not suggestion_clicked:
                                 print("尝试使用JavaScript查找话题建议...")
                                 js_click_result = await self.browser.main_page.evaluate(f'''
-                                    () => {{
-                                        // 查找包含话题文本的元素
-                                        const allElements = Array.from(document.querySelectorAll('div, li, span, a'));
-                                        
-                                        // 寻找包含当前话题关键词的建议项
-                                        const topicKeyword = "{topic}";
-                                        const suggestionItems = allElements.filter(el => {{
-                                            const text = el.textContent;
-                                            return text && (
-                                                text.includes('#{topic}') ||
-                                                text.includes(topicKeyword) ||
-                                                text.includes('次浏览')
+                                    (topicText) => {{
+                                        const suggestionContainerSelectors = [
+                                            '.xhs-topic-suggestions-dropdown', // Hypothetical specific container
+                                            '.el-autocomplete-suggestion__wrap',
+                                            'div[class*="topic-suggestion-list"]',
+                                            'ul[role="listbox"][aria-label*="话题"]'
+                                        ];
+                                        let container = null;
+                                        for (const sel of suggestionContainerSelectors) {{
+                                            container = document.querySelector(sel);
+                                            if (container) break;
+                                        }}
+                                        if (!container) {{
+                                            // If no specific container, fallback to a wider search area, 
+                                            // but this is less reliable.
+                                            container = document.body; 
+                                            console.warn("Topic suggestion container not found, JS fallback might be slow/unreliable.");
+                                        }}
+
+                                        const items = Array.from(container.querySelectorAll('li[role="option"], div[role="option"], .suggestion-item, .topic-item'));
+                                        let targetItem = items.find(item => 
+                                            item.textContent && item.textContent.includes(topicText) && item.offsetParent !== null
+                                        );
+
+                                        if (!targetItem) {{ // Broader search if exact match fails
+                                            targetItem = items.find(item => 
+                                                item.textContent && item.textContent.includes(topicText.replace("#","")) && item.offsetParent !== null
                                             );
-                                        }});
+                                        }}
                                         
-                                        if (suggestionItems.length > 0) {{
-                                            // 优先选择完全匹配的项
-                                            let targetItem = suggestionItems.find(el => 
-                                                el.textContent.includes('#{topic}')
-                                            );
-                                            
-                                            // 如果没有完全匹配，选择第一个相关项
-                                            if (!targetItem) {{
-                                                targetItem = suggestionItems[0];
-                                            }}
-                                            
-                                            // 高亮并点击
-                                            targetItem.style.border = '3px solid red';
+                                        if (targetItem) {{
+                                            targetItem.style.border = '3px solid red'; // For visual debugging if needed
                                             targetItem.click();
-                                            
                                             return {{
                                                 success: true,
                                                 text: targetItem.textContent.trim(),
-                                                found: suggestionItems.length
+                                                found: items.length
                                             }};
                                         }}
-                                        
-                                        return {{ success: false, found: 0 }};
+                                        return {{ success: false, found: items.length }};
                                     }}
-                                ''')
+                                ''', f"#{topic}") // Pass topic with #
                                 
                                 print(f"JavaScript点击结果: {js_click_result}")
                                 if js_click_result.get('success'):
@@ -242,16 +275,16 @@ class PublishManager:
                                 print(f"未找到话题建议项，标签 {topic_text} 可能未被激活")
                                 # 按回车或空格尝试确认
                                 await content_input.press('Enter')
-                                await asyncio.sleep(0.5)
+                                await self.browser.main_page.wait_for_timeout(500)
                             
                             # 如果不是最后一个话题，添加空格
                             if i < len(topics) - 1:
                                 await content_input.type(' ')
-                                await asyncio.sleep(0.5)
+                                await self.browser.main_page.wait_for_timeout(500)
                         
                         print("话题标签添加完成")
                     
-                    await asyncio.sleep(1)
+                    await self.browser.main_page.wait_for_timeout(1000)
                 else:
                     print("未找到内容输入框，使用兼容逻辑")
                     # 兼容原有逻辑
@@ -276,7 +309,7 @@ class PublishManager:
                         full_content = f"{content}\n\n{topic_tags}"
                     
                     await self.browser.main_page.keyboard.type(full_content)
-                    await asyncio.sleep(1)
+                    await self.browser.main_page.wait_for_timeout(1000)
             except Exception as e:
                 print(f"输入正文内容时出错: {str(e)}")
             
@@ -285,13 +318,29 @@ class PublishManager:
             if immediate_publish:
                 # 确保选择立即发布
                 await immediate_publish.click()
-                await asyncio.sleep(1)
+                await self.browser.main_page.wait_for_timeout(1000)
             
             # 点击发布按钮
-            publish_button = await self.browser.main_page.query_selector('button:has-text("发布"), button:has-text("发布笔记"), [aria-label="发布"]')
+            publish_button_selectors = [
+                'button[data-testid="publish-note-button"]',
+                'button#publish-note-btn',
+                'button.publish-button-primary',
+                'button.xhs-publish-button[type="button"]',
+                'button[aria-label="立即发布"]',
+                'button:has-text("发布笔记")' , # More specific text first
+                'button:has-text("发布")',
+                '[aria-label="发布"]', # Most generic, last resort
+            ]
+            publish_button = None
+            for selector in publish_button_selectors:
+                publish_button = await self.browser.main_page.query_selector(selector)
+                if publish_button:
+                    print(f"Found publish button with selector: {selector}")
+                    break
+            
             if publish_button:
                 await publish_button.click()
-                await asyncio.sleep(5)  # 等待发布完成
+                await self.browser.main_page.wait_for_selector('text*="发布成功", text*="笔记发布成功", div[class*="success-toast"]', timeout=15000)  # 等待发布完成
                 
                 # 检查是否有发布成功的提示
                 success_message = await self.browser.main_page.query_selector('text="发布成功"')
@@ -332,77 +381,82 @@ class PublishManager:
             except Exception as ss_e:
                 print(f"截图失败: {str(ss_e)}")
             
-            # 查找红色上传图片按钮 - 基于截图中的视觉特征添加精确选择器
-            red_upload_button_selectors = [
-                'button.el-button--danger',  # 红色按钮类
-                '.el-button--danger',        # 红色按钮类
-                'button.upload-btn',         # 上传按钮
-                '.upload-image-btn',         # 上传图片按钮
-                'button.upload-image-btn',   # 上传图片按钮
-                '.upload-btn',               # 上传按钮
-                'button:has-text("上传图片")',  # 文本匹配
-                '.el-upload button',         # Element UI上传组件的按钮
-                '.el-upload__input',         # Element UI上传组件的输入
-                '.upload-area button',       # 上传区域中的按钮
-                '.upload-btn--primary',      # 主要上传按钮
-                '.upload-container button'   # 上传容器中的按钮
+            # Optimized and prioritized selectors for the image upload trigger
+            # The goal is to click the visible element that opens the file dialog
+            upload_trigger_selectors = [
+                'button[data-testid="image-upload-trigger-button"]', # Ideal: specific test ID
+                '#image-upload-button-id',                          # Ideal: specific ID
+                'button.xhs-image-upload-button',                   # Ideal: specific class
+                'button.custom-upload-btn-image',                   # Another hypothetical specific class
+                'div.image-upload-area button:has-text("上传图片")',  # Button with text in a defined area
+                'div.image-upload-area button:has-text("添加图片")',
+                'button:has-text("上传图片")',                        # General button with text
+                # Fallbacks if specific selectors fail
+                '.upload-image-btn',
+                'button.upload-btn',
+                '.el-upload button', # If Element UI is used
             ]
-            
-            # 首先尝试直接找到输入元素
-            file_input = await self.browser.main_page.query_selector('input[type="file"]')
-            if file_input:
-                print("找到文件输入元素，直接设置文件")
-                await file_input.set_input_files(img_path)
-                print(f"已直接设置文件: {img_path}")
-                await asyncio.sleep(3)  # 等待图片上传
-                return  # 如果成功直接设置文件，跳过后续尝试
-                        
-            # 尝试具体的红色上传按钮选择器
-            upload_button = None
-            for selector in red_upload_button_selectors:
-                print(f"尝试红色上传按钮选择器: {selector}")
-                button = await self.browser.main_page.query_selector(selector)
-                if button:
-                    upload_button = button
-                    print(f"找到红色上传按钮，使用选择器: {selector}")
+
+            upload_trigger = None
+            for selector in upload_trigger_selectors:
+                trigger = await self.browser.main_page.query_selector(selector)
+                if trigger and await trigger.is_visible(): # Ensure the trigger is visible
+                    upload_trigger = trigger
+                    print(f"Found visible image upload trigger with selector: {selector}")
                     break
             
-            # 如果找到红色上传按钮，尝试点击上传
-            if upload_button:
-                print("找到红色上传按钮，准备上传图片")
+            # If a trigger is found, use file_chooser; otherwise, try direct input (less common for styled uploads)
+            if upload_trigger:
+                print("Visible image upload trigger found, preparing to click and use file chooser.")
                 
                 # 检查按钮是否可见和可点击
                 is_visible = await upload_button.is_visible()
                 print(f"按钮可见: {is_visible}")
                 
-                # 使用fileChooser处理文件上传
                 try:
-                    # 设置较长的超时时间等待文件选择器
-                    file_chooser_promise = self.browser.main_page.wait_for_file_chooser(timeout=10000)
-                    await upload_button.click()
-                    print("已点击红色上传按钮")
+                    async with self.browser.main_page.expect_file_chooser(timeout=10000) as fc_info:
+                        await upload_trigger.click()
+                        print(f"Clicked image upload trigger: {await upload_trigger.text_content()}")
                     
-                    try:
-                        file_chooser = await file_chooser_promise
-                        await file_chooser.set_files(img_path)
-                        print(f"已设置文件: {img_path}")
-                        await asyncio.sleep(3)  # 等待图片上传
-                    except Exception as fc_e:
-                        print(f"等待文件选择器出错: {str(fc_e)}")
-                        
-                        # 如果文件选择器没出现，尝试直接查找文件输入元素
-                        try:
-                            await asyncio.sleep(1)  # 等待可能的DOM变化
-                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
-                            if file_input:
-                                print("点击按钮后找到文件输入元素")
-                                await file_input.set_input_files(img_path)
-                                print(f"已设置文件: {img_path}")
-                                await asyncio.sleep(3)  # 等待图片上传
-                        except Exception as fi_e:
-                            print(f"尝试找文件输入元素出错: {str(fi_e)}")
-                except Exception as click_e:
-                    print(f"点击上传按钮出错: {str(click_e)}")
+                    file_chooser = await fc_info.value
+                    await file_chooser.set_files(img_path)
+                    print(f"Successfully set files using file_chooser for image: {img_path}")
+                    await self.browser.main_page.wait_for_timeout(3000) # Wait for upload to process
+                    return # Successfully uploaded
+                except Exception as e:
+                    print(f"Using file_chooser for image upload failed: {e}. Will attempt direct input if possible.")
+
+            # Fallback or alternative: Try to find a specific, possibly hidden, file input and set files directly
+            # This is useful if the button doesn't reliably trigger a file chooser event recognized by Playwright
+            # or if the input becomes available/targetable after some other interactions.
+            direct_file_input_selectors = [
+                'input[type="file"][data-testid="image-file-input"]', # Ideal: specific test ID for the input
+                'input[type="file"][name="image_upload"]',          # Common name attribute
+                '#hidden-image-uploader-input',                      # Hypothetical specific ID for a hidden input
+                'input[type="file"][accept^="image/"]',             # Standard file input for images
+                'input.xhs-image-file-input',                        # Hypothetical specific class for the input
+            ]
+            file_input_element = None
+            for selector in direct_file_input_selectors:
+                element = await self.browser.main_page.query_selector(selector)
+                # Check if element exists and is not the one already tried if upload_trigger was an input
+                if element and (not upload_trigger or await element.evaluate_handle('(el, trigger) => el !== trigger', upload_trigger) if upload_trigger else True) :
+                    file_input_element = element
+                    print(f"Found direct image file input with selector: {selector}")
+                    break
+            
+            if file_input_element:
+                try:
+                    await file_input_element.set_input_files(img_path)
+                    print(f"Successfully set files directly to image input: {img_path}")
+                    await self.browser.main_page.wait_for_timeout(3000) # Wait for upload
+                    return # Successfully uploaded
+                except Exception as e:
+                    print(f"Setting files directly to image input failed: {e}")
+            
+            if not upload_trigger and not file_input_element:
+                 print("No visible image upload trigger or direct file input found after optimizations.")
+
             
         except Exception as e:
             print(f"上传图片过程中出错: {str(e)}")
@@ -420,136 +474,132 @@ class PublishManager:
             
             print(f"尝试上传视频: {video_path}")
             
-            # 查找视频上传相关的按钮和输入元素
-            video_upload_selectors = [
-                'input[type="file"][accept*="video"]',  # 接受视频的文件输入
-                'input[type="file"]',                   # 通用文件输入
-                'button:has-text("上传视频")',          # 上传视频按钮
-                'button:has-text("选择视频")',          # 选择视频按钮
-                '.video-upload-btn',                   # 视频上传按钮类
-                '.upload-video-btn',                   # 上传视频按钮类
-                '.el-upload button',                   # Element UI上传组件的按钮
-                '.upload-area',                        # 上传区域
-                '.video-upload-area'                   # 视频上传区域
+            # Optimized and prioritized selectors for the video upload trigger
+            upload_trigger_selectors = [
+                'button[data-testid="video-upload-trigger-button"]',
+                '#video-upload-trigger-id',
+                'button.xhs-video-upload-button',
+                'div.video-upload-area button:has-text("上传视频")',
+                'div.video-upload-area button:has-text("选择视频")',
+                'button:has-text("上传视频")', # General buttons
+                'button:has-text("选择视频")',
+                '.video-upload-btn', # Class-based fallbacks
+                '.upload-video-btn',
+                '.el-upload button[accept*="video"]', # Element UI specific
             ]
-            
-            # 首先尝试直接找到视频文件输入元素
-            for selector in video_upload_selectors:
-                print(f"尝试视频上传选择器: {selector}")
+
+            upload_trigger = None
+            for selector in upload_trigger_selectors:
+                trigger = await self.browser.main_page.query_selector(selector)
+                if trigger and await trigger.is_visible():
+                    upload_trigger = trigger
+                    print(f"Found visible video upload trigger with selector: {selector}")
+                    break
+
+            if upload_trigger:
+                print("Visible video upload trigger found, preparing to click and use file chooser.")
+                try:
+                    async with self.browser.main_page.expect_file_chooser(timeout=10000) as fc_info:
+                        await upload_trigger.click()
+                        print(f"Clicked video upload trigger: {await upload_trigger.text_content()}")
+                    
+                    file_chooser = await fc_info.value
+                    await file_chooser.set_files(video_path)
+                    print(f"Successfully set files using file_chooser for video: {video_path}")
+                    await self.browser.main_page.wait_for_timeout(5000) # Wait for upload
+                    return # Successfully uploaded
+                except Exception as e:
+                    print(f"Using file_chooser for video upload failed: {e}. Will attempt direct input.")
+
+            # Fallback or alternative: Try to find a specific, possibly hidden, video file input
+            direct_file_input_selectors = [
+                'input[type="file"][data-testid="video-file-input"]',
+                'input[type="file"][name="video_upload"]',
+                '#hidden-video-uploader-input',
+                'input[type="file"][accept*="video"]', # Standard and most reliable for video
+                'input.xhs-video-file-input',
+            ]
+            file_input_element = None
+            for selector in direct_file_input_selectors:
                 element = await self.browser.main_page.query_selector(selector)
-                if element:
-                    element_tag = await element.evaluate('el => el.tagName')
-                    if element_tag == 'INPUT':
-                        print("找到视频文件输入元素，直接设置文件")
-                        await element.set_input_files(video_path)
-                        print(f"已直接设置视频文件: {video_path}")
-                        await asyncio.sleep(5)  # 视频上传需要更长时间
+                if element and (not upload_trigger or await element.evaluate_handle('(el, trigger) => el !== trigger', upload_trigger) if upload_trigger else True):
+                    file_input_element = element
+                    print(f"Found direct video file input with selector: {selector}")
+                    break
+            
+            if file_input_element:
+                try:
+                    await file_input_element.set_input_files(video_path)
+                    print(f"Successfully set files directly to video input: {video_path}")
+                    await self.browser.main_page.wait_for_timeout(5000) # Wait for upload
+                    return # Successfully uploaded
+                except Exception as e:
+                    print(f"Setting files directly to video input failed: {e}")
+
+            # If both trigger and direct input methods fail, try JavaScript fallback
+            if not upload_trigger and not file_input_element:
+                print("Python selectors for video upload failed. Attempting JavaScript fallback.")
+                js_upload_success = await self.browser.main_page.evaluate('''
+                    async (filePath) => { // filePath will be passed as an argument from Python
+                        // Priority 1: Specific file input for videos
+                        let videoInput = document.querySelector('input[type="file"][accept*="video"]');
+                        if (videoInput && videoInput.offsetParent === null) { // if hidden, try to find its label
+                            const label = document.querySelector(`label[for="${videoInput.id}"]`);
+                            if (label) label.click(); // Click label to potentially show input or trigger dialog
+                        }
+                        // If still no direct input visible or clickable, try buttons
+                        if (!videoInput || videoInput.offsetParent === null) {
+                            const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
+                            const uploadButton = buttons.find(b => 
+                                b.textContent && 
+                                (b.textContent.includes('上传视频') || b.textContent.includes('选择视频')) &&
+                                b.offsetParent !== null
+                            );
+                            if (uploadButton) {
+                                uploadButton.click(); // This should trigger the file chooser
+                                // Playwright's set_input_files or file_chooser must handle the dialog opened by this click
+                                // This JS function can't directly set files to a dialog it merely opens.
+                                // It can, however, set files if it finds a *direct, visible* file input.
+                                console.log('JS clicked a video upload button. File dialog should be open.');
+                                return { clickedButton: true, foundDirectInput: false }; 
+                            }
+                        }
+                        // Try to use a direct input if found (even if not initially visible, set_input_files might work)
+                        if (videoInput) {
+                             console.log('JS found a direct video input. Playwright should use set_input_files on this.');
+                            // Cannot set files from evaluate, this is a marker for Playwright
+                            return { clickedButton: false, foundDirectInput: true, selector: 'input[type="file"][accept*="video"]' };
+                        }
+                        return { clickedButton: false, foundDirectInput: false };
+                    }
+                ''') # We don't pass filePath here as JS cannot set files to dialogs.
+
+                if js_upload_success and js_upload_success.get('clickedButton'):
+                    print("JavaScript fallback clicked an upload button. Waiting for file chooser.")
+                    try:
+                        async with self.browser.main_page.expect_file_chooser(timeout=10000) as fc_info:
+                            # The click was already performed by JS, we are just waiting for the chooser
+                            print("JS already clicked, now just expecting chooser.")
+                        file_chooser = await fc_info.value
+                        await file_chooser.set_files(video_path)
+                        print(f"Successfully set video files via JS-triggered file_chooser: {video_path}")
+                        await self.browser.main_page.wait_for_timeout(5000)
                         return
-                    else:
-                        # 如果是按钮，尝试点击
-                        print(f"找到视频上传按钮: {selector}")
+                    except Exception as e:
+                        print(f"JS-triggered file_chooser for video failed: {e}")
+                elif js_upload_success and js_upload_success.get('foundDirectInput'):
+                    print("JavaScript fallback identified a direct input. Attempting to set files via Playwright.")
+                    direct_input = await self.browser.main_page.query_selector(js_upload_success.get('selector'))
+                    if direct_input:
                         try:
-                            file_chooser_promise = self.browser.main_page.wait_for_file_chooser(timeout=10000)
-                            await element.click()
-                            print("已点击视频上传按钮")
-                            
-                            file_chooser = await file_chooser_promise
-                            await file_chooser.set_files(video_path)
-                            print(f"已设置视频文件: {video_path}")
-                            await asyncio.sleep(5)  # 视频上传需要更长时间
+                            await direct_input.set_input_files(video_path)
+                            print(f"Successfully set video files to JS-identified direct input: {video_path}")
+                            await self.browser.main_page.wait_for_timeout(5000)
                             return
                         except Exception as e:
-                            print(f"点击视频上传按钮失败: {str(e)}")
-                            continue
-            
-            # 如果找不到特定的视频上传元素，尝试通用的文件上传
-            print("未找到特定的视频上传元素，尝试通用文件上传方式")
-            
-            # 使用JavaScript查找上传元素
-            js_result = await self.browser.main_page.evaluate('''
-                () => {
-                    // 查找包含"上传视频"、"选择视频"等文本的按钮
-                    const textElements = Array.from(document.querySelectorAll('button, a, div, span'));
-                    const videoUploadBtn = textElements.find(el => 
-                        el.textContent && (
-                            el.textContent.includes('上传视频') ||
-                            el.textContent.includes('选择视频') ||
-                            el.textContent.includes('添加视频')
-                        )
-                    );
-                    
-                    if (videoUploadBtn) {
-                        videoUploadBtn.style.border = '5px solid green';
-                        return {
-                            found: true,
-                            method: 'text',
-                            tag: videoUploadBtn.tagName,
-                            text: videoUploadBtn.textContent.trim()
-                        };
-                    }
-                    
-                    // 查找所有文件输入元素
-                    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-                    if (fileInputs.length > 0) {
-                        fileInputs[0].style.border = '5px solid blue';
-                        return {
-                            found: true,
-                            method: 'input',
-                            tag: fileInputs[0].tagName,
-                            accept: fileInputs[0].accept || 'none'
-                        };
-                    }
-                    
-                    // 查找上传区域
-                    const uploadAreas = Array.from(document.querySelectorAll('.upload-area, .el-upload, [class*="upload"]'));
-                    if (uploadAreas.length > 0) {
-                        uploadAreas[0].style.border = '5px solid yellow';
-                        return {
-                            found: true,
-                            method: 'area',
-                            tag: uploadAreas[0].tagName,
-                            classes: uploadAreas[0].className
-                        };
-                    }
-                    
-                    return { found: false };
-                }
-            ''')
-            
-            print(f"JavaScript查找视频上传元素结果: {js_result}")
-            
-            if js_result.get('found'):
-                # 根据查找结果尝试上传
-                method = js_result.get('method')
-                if method == 'input':
-                    # 直接使用文件输入
-                    file_input = await self.browser.main_page.query_selector('input[type="file"]')
-                    if file_input:
-                        await file_input.set_input_files(video_path)
-                        print(f"通过文件输入设置视频: {video_path}")
-                        await asyncio.sleep(5)
+                             print(f"Setting files to JS-identified direct video input failed: {e}")
                 else:
-                    # 尝试点击按钮或区域
-                    clicked = await self.browser.main_page.evaluate('''
-                        () => {
-                            const highlightedElements = Array.from(document.querySelectorAll('[style*="border: 5px solid"]'));
-                            if (highlightedElements.length > 0) {
-                                highlightedElements[0].click();
-                                return true;
-                            }
-                            return false;
-                        }
-                    ''')
-                    
-                    if clicked:
-                        print("通过JavaScript成功点击了视频上传元素")
-                        try:
-                            file_chooser = await self.browser.main_page.wait_for_file_chooser(timeout=5000)
-                            await file_chooser.set_files(video_path)
-                            print(f"通过点击设置视频文件: {video_path}")
-                            await asyncio.sleep(5)
-                        except Exception as e:
-                            print(f"点击后等待文件选择器失败: {str(e)}")
+                    print("All video upload attempts, including JavaScript fallback, failed.")
             
         except Exception as e:
             print(f"上传视频过程中出错: {str(e)}") 
