@@ -131,7 +131,7 @@ class LoginStateManager:
                 await self.browser.goto("https://www.xiaohongshu.com", wait_time=3)
             
             # 等待页面加载
-            await asyncio.sleep(2)
+            await self.browser.main_page.wait_for_selector('body', state='visible', timeout=5000)
             
             # 检查是否有登录按钮
             login_elements = await self.browser.main_page.query_selector_all('text="登录"')
@@ -211,7 +211,6 @@ class LoginStateManager:
             # 访问小红书首页
             if not self.browser.main_page.url.startswith("https://www.xiaohongshu.com"):
                 await self.browser.main_page.goto("https://www.xiaohongshu.com", timeout=60000)
-                await asyncio.sleep(3)
             
             # 查找登录按钮并点击
             login_elements = await self.browser.main_page.query_selector_all('text="登录"')
@@ -233,7 +232,7 @@ class LoginStateManager:
                     still_login = await self.browser.main_page.query_selector_all('text="登录"')
                     if not still_login:
                         self.browser.is_logged_in = True
-                        await asyncio.sleep(2)  # 等待页面加载
+                        await self.browser.main_page.wait_for_timeout(2000)  # 等待页面加载
                         
                         # 保存登录状态
                         await self.save_login_state({
@@ -246,7 +245,7 @@ class LoginStateManager:
                         return "登录成功！"
                     
                     # 继续等待
-                    await asyncio.sleep(wait_interval)
+                    await self.browser.main_page.wait_for_timeout(wait_interval * 1000)
                     waited_time += wait_interval
                 
                 return "登录等待超时。请重试或检查网络连接。"

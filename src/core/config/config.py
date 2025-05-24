@@ -2,6 +2,7 @@
 配置模块，集中管理所有配置项和常量
 """
 import os
+import ahocorasick # Added for Aho-Corasick automaton
 from datetime import datetime
 from typing import Dict, List
 from dataclasses import dataclass
@@ -95,6 +96,20 @@ class Config:
             "base_delay": float(os.getenv("RETRY_BASE_DELAY", 1.0)),
             "backoff_factor": float(os.getenv("RETRY_BACKOFF_FACTOR", 2.0))
         }
+
+        self._build_domain_automaton()
+
+    def _build_domain_automaton(self):
+        """Builds the Aho-Corasick automaton for domain detection."""
+        A = ahocorasick.Automaton()
+        for domain_name, keywords in self.domain_keywords.items():
+            for keyword in keywords:
+                lkey = keyword.lower()
+                # Store a tuple: (original_keyword_case_insensitive, domain_name)
+                A.add_word(lkey, (lkey, domain_name))
+        A.make_automaton()
+        self.domain_automaton = A
+        print("Domain detection automaton built.")
 
     def validate(self):
         """验证配置的有效性"""

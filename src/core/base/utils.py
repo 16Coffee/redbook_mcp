@@ -4,7 +4,8 @@
 import re
 import json
 from typing import List, Dict, Any
-from src.core.config.config import DOMAIN_KEYWORDS
+# Updated import to get the full config object
+from src.core.config.config import config
 
 def extract_text(text, prefix, suffix=None):
     """从文本中提取特定前缀和后缀之间的内容
@@ -76,20 +77,19 @@ def detect_domain(title, content):
     Returns:
         list: 检测到的领域列表
     """
-    detected_domains = []
+    found_domains = set()
     combined_text = f"{title} {content}".lower()
-    
-    for domain, domain_keys in DOMAIN_KEYWORDS.items():
-        for key in domain_keys:
-            if key.lower() in combined_text:
-                detected_domains.append(domain)
-                break
+
+    # Use the Aho-Corasick automaton from the config
+    # The automaton stores (keyword_found, domain_name) tuples
+    for end_index, (keyword_found, domain_name) in config.domain_automaton.iter(combined_text):
+        found_domains.add(domain_name)
     
     # 如果没有检测到明确的领域，默认为生活方式
-    if not detected_domains:
-        detected_domains = ["生活"]
+    if not found_domains:
+        return ["生活"]
     
-    return detected_domains
+    return list(found_domains)
 
 def extract_keywords(text, limit=20):
     """从文本中提取关键词

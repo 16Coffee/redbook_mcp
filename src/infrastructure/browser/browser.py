@@ -715,7 +715,7 @@ class BrowserManager:
                 return originalDefineProperty.call(this, obj, prop, descriptor);
             };
             
-            console.log('🔒 超强反检测脚本已注入完成');
+            // console.log('🔒 超强反检测脚本已注入完成'); // Removed for optimization
         }
         """
         
@@ -770,7 +770,7 @@ class BrowserManager:
             # 仅访问首页检查登录状态
             if not self.main_page.url.startswith("https://www.xiaohongshu.com"):
                 await self.main_page.goto("https://www.xiaohongshu.com", timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(DEFAULT_WAIT_TIME)
+                await self.main_page.wait_for_selector('body', timeout=DEFAULT_TIMEOUT)  # Wait for homepage to be ready
             
             # 检查是否已登录
             login_elements = await self.main_page.query_selector_all('text="登录"')
@@ -824,7 +824,7 @@ class BrowserManager:
         for attempt in range(max_retries + 1):
             try:
                 await self.main_page.goto(url, timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(wait_time)  # 等待页面加载
+                await self.main_page.wait_for_load_state('domcontentloaded', timeout=DEFAULT_TIMEOUT)  # 等待页面加载
                 
                 # 检查是否出现登录弹窗或登录提示
                 await self._handle_login_popup()
@@ -893,7 +893,7 @@ class BrowserManager:
         
         try:
             await self.main_page.evaluate(script)
-            await asyncio.sleep(3)  # 等待滚动完成和内容加载
+            await self.main_page.wait_for_timeout(3000)  # 等待滚动完成和内容加载
         except Exception as e:
             logger.warning(f"执行滚动脚本失败: {str(e)}")
     
@@ -973,19 +973,8 @@ class BrowserManager:
         hide_automation_css = """
         /* 最强力的隐藏策略 - 隐藏所有可能的提示栏 */
         
-        /* 1. 通过文本内容隐藏 */
-        *:has-text("Chrome 正受到自动测试软件的控制"),
-        *:has-text("automated test software"),
-        *:has-text("正受到自动测试软件的控制"),
-        *:has-text("不受支持的命令行标记"),
-        *:has-text("--no-sandbox"),
-        *:has-text("--disable-blink-features"),
-        *:has-text("AutomationControlled"),
-        *:has-text("稳定性和安全性将会有所下降"),
-        *:has-text("unsupported command-line flag"),
-        *:has-text("stability and security will suffer"),
-        *:has-text("命令行标记"),
-        *:has-text("command-line flag"),
+        /* 1. 通过文本内容隐藏 - REMOVED :has-text and :contains as they are not standard CSS */
+        /* Non-standard selectors like :has-text will be handled by Playwright's engine if used in query_selector, not in raw CSS */
         
         /* 2. 通过元素属性隐藏 */
         [role="alert"],
@@ -1056,27 +1045,11 @@ class BrowserManager:
             outline: none !important;
         }
         
-        /* 8. 更激进的隐藏 - 基于内容模式 */
-        div:contains("Chrome"),
-        div:contains("自动"),
-        div:contains("automation"),
-        div:contains("controlled"),
-        div:contains("软件"),
-        div:contains("命令行"),
-        div:contains("sandbox"),
-        div:contains("blink-features"),
-        div:contains("AutomationControlled"),
-        div:contains("安全性"),
-        div:contains("稳定性") {
-            display: none !important;
-        }
+        /* 8. 更激进的隐藏 - 基于内容模式 - REMOVED :contains as it's not standard CSS */
+        /* This type of dynamic text matching is better handled by JS if absolutely necessary, 
+           or by very specific classes/IDs if such banners have them. */
         
-        /* 9. 隐藏任何包含警告关键词的父容器 */
-        *:has(*:contains("Chrome 正受到")),
-        *:has(*:contains("不受支持的命令行")),
-        *:has(*:contains("disable-blink-features")) {
-            display: none !important;
-        }
+        /* 9. 隐藏任何包含警告关键词的父容器 - REMOVED *:has as it's not broadly supported or standard in this context */
         
         /* 10. 确保body顶部没有额外的间距 */
         body {
@@ -1102,56 +1075,24 @@ class BrowserManager:
             # 额外的JavaScript隐藏脚本
             additional_hide_script = """
             () => {
-                // 定期检查并隐藏任何新出现的警告元素
-                const hideElements = () => {
-                    // 隐藏包含特定文本的元素
-                    const textToHide = [
-                        'Chrome 正受到自动测试软件的控制',
-                        'automated test software',
-                        '不受支持的命令行标记',
-                        '--no-sandbox',
-                        '--disable-blink-features',
-                        'AutomationControlled',
-                        '稳定性和安全性将会有所下降',
-                        'unsupported command-line flag',
-                        'stability and security will suffer',
-                        '命令行标记',
-                        'command-line flag'
-                    ];
-                    
-                    textToHide.forEach(text => {
-                        const elements = Array.from(document.querySelectorAll('*')).filter(el => 
-                            el.textContent && el.textContent.includes(text)
-                        );
-                        elements.forEach(el => {
-                            el.style.display = 'none';
-                            el.style.visibility = 'hidden';
-                            el.style.opacity = '0';
-                            el.style.position = 'fixed';
-                            el.style.top = '-9999px';
-                            el.style.left = '-9999px';
-                            if (el.parentNode) {
-                                el.parentNode.removeChild(el);
-                            }
-                        });
-                    });
-                    
-                    // 隐藏所有role="alert"的元素
+                // Optimized function to hide specific alert roles
+                const hideAlertElements = () => {
                     document.querySelectorAll('[role="alert"], [role="alertdialog"]').forEach(el => {
-                        el.style.display = 'none';
-                        el.style.visibility = 'hidden';
-                        el.remove();
+                        if (el.offsetParent !== null) { // Check if visible
+                            el.style.display = 'none !important';
+                            el.style.visibility = 'hidden !important';
+                            el.style.opacity = '0 !important';
+                            // Consider not removing, just hiding, to avoid breaking page logic if element is expected
+                            // el.remove(); 
+                        }
                     });
                 };
                 
                 // 立即执行一次
-                hideElements();
+                hideAlertElements();
                 
-                // 每500ms检查一次
-                setInterval(hideElements, 500);
-                
-                // 监听DOM变化
-                const observer = new MutationObserver(hideElements);
+                // 监听DOM变化 - Observer calls the optimized function
+                const observer = new MutationObserver(hideAlertElements);
                 observer.observe(document.body, {
                     childList: true,
                     subtree: true,
