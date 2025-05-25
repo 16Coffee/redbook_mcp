@@ -273,151 +273,150 @@ class BrowserManager:
     
     async def _start_browser(self):
         """启动浏览器并创建上下文"""
-        try:
-            # 启动浏览器
-            self.playwright_instance = await async_playwright().start()
-            
-            # 极简反检测配置：完全移除可能触发警告的参数，改用纯JS反检测
-            browser_args = [
-                # 基础参数（不会触发任何警告）
-                '--exclude-switches=enable-automation',  # 排除自动化开关
-                '--disable-extensions',  # 禁用扩展
-                '--disable-plugins',  # 禁用插件
-                '--disable-default-apps',  # 禁用默认应用
-                '--disable-popup-blocking',  # 禁用弹窗阻止
-                '--disable-translate',  # 禁用翻译
-                '--disable-features=Translate,OptimizationHints',  # 禁用翻译等功能
-                '--no-first-run',  # 跳过首次运行
-                '--no-default-browser-check',  # 跳过默认浏览器检查
-                '--disable-component-update',  # 禁用组件更新
-                '--disable-background-timer-throttling',  # 禁用后台定时器限制
-                '--disable-renderer-backgrounding',  # 禁用渲染器后台
-                '--disable-backgrounding-occluded-windows',  # 禁用后台窗口
-                '--disable-hang-monitor',  # 禁用挂起监视器
-                '--disable-prompt-on-repost',  # 禁用重新发布时的提示
-                '--disable-sync',  # 禁用同步
-                '--disable-background-networking',  # 禁用后台网络
-                '--disable-domain-reliability',  # 禁用域名可靠性
-                '--disable-client-side-phishing-detection',  # 禁用客户端钓鱼检测
-                '--disable-background-mode',  # 禁用后台模式
-                '--metrics-recording-only',  # 仅记录指标
-                '--disable-infobars',  # 禁用信息栏
-                '--disable-save-password-bubble',  # 禁用保存密码气泡
-                # 完全移除所有可能触发警告的参数
-                # '--disable-blink-features=AutomationControlled',  # 移除：会触发警告
-                # '--no-sandbox',  # 已移除
-                # '--disable-web-security',  # 已移除
-                # '--disable-dev-shm-usage',  # 已移除
-            ]
-            
-            # 真实的User Agent（模拟最新Chrome浏览器）
-            realistic_user_agent = (
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/120.0.0.0 Safari/537.36'
-            )
-            
-            # 使用持久化上下文来保存用户状态
-            self.browser_context = await self.playwright_instance.chromium.launch_persistent_context(
-                user_data_dir=BROWSER_DATA_DIR,
-                headless=False,  # 非隐藏模式，方便用户登录
-                viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
-                timeout=DEFAULT_TIMEOUT,
-                args=browser_args,  # 添加强化的反检测参数
-                user_agent=realistic_user_agent,  # 设置真实User Agent
-                # 额外的反检测配置
-                locale='zh-CN',  # 设置中文本地化
-                timezone_id='Asia/Shanghai',  # 设置中国时区
-                permissions=['geolocation', 'notifications'],  # 授予常见权限
-                # 屏幕和设备信息
-                screen={'width': 1920, 'height': 1080},
-                device_scale_factor=1,
-                # 禁用自动化标志
-                ignore_default_args=[
-                    '--enable-automation',
-                    '--no-sandbox',         # 关键：忽略no-sandbox参数，避免安全警告
-                ],
-                # 额外参数
-                extra_http_headers={
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-User': '?1',
-                    'Upgrade-Insecure-Requests': '1',
-                }
-            )
-            
-            # 创建一个新页面
-            if self.browser_context.pages:
-                self.main_page = self.browser_context.pages[0]
-            else:
-                self.main_page = await self.browser_context.new_page()
-            
-            # 设置页面级别的超时时间
-            self.main_page.set_default_timeout(DEFAULT_TIMEOUT)
-            
-            # 高级反检测：注入JavaScript脚本来伪装浏览器环境
-            await self._inject_stealth_scripts()
-            
-            # 额外：隐藏自动化信息栏的CSS注入
-            await self._hide_automation_bar()
-            
-            logger.info("浏览器启动成功，已应用强化反检测配置")
-            
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"启动浏览器失败: {error_msg}")
-            
-            # 特殊处理：浏览器实例冲突
-            if "ProcessSingleton" in error_msg or "SingletonLock" in error_msg:
-                logger.warning("检测到浏览器实例冲突，尝试清理并重试")
-                await self._handle_singleton_conflict()
+        # 在启动前先主动处理可能的冲突
+        await self._handle_singleton_conflict()
+        
+        # 记录启动次数
+        restart_count = 0
+        max_restart_attempts = 3
+        
+        while restart_count < max_restart_attempts:
+            try:
+                restart_count += 1
+                logger.info(f"[BrowserManager] 开始启动浏览器 (第{restart_count}次)")
                 
-                # 重试启动
+                # 启动浏览器
+                self.playwright_instance = await async_playwright().start()
+                
+                # 极简反检测配置：完全移除可能触发警告的参数，改用纯JS反检测
+                browser_args = [
+                    # 基础参数（不会触发任何警告）
+                    '--exclude-switches=enable-automation',  # 排除自动化开关
+                    '--disable-extensions',  # 禁用扩展
+                    '--disable-plugins',  # 禁用插件
+                    '--disable-default-apps',  # 禁用默认应用
+                    '--disable-popup-blocking',  # 禁用弹窗阻止
+                    '--disable-translate',  # 禁用翻译
+                    '--disable-features=Translate,OptimizationHints',  # 禁用翻译等功能
+                    '--no-first-run',  # 跳过首次运行
+                    '--no-default-browser-check',  # 跳过默认浏览器检查
+                    '--disable-component-update',  # 禁用组件更新
+                    '--disable-background-timer-throttling',  # 禁用后台定时器限制
+                    '--disable-renderer-backgrounding',  # 禁用渲染器后台
+                    '--disable-backgrounding-occluded-windows',  # 禁用后台窗口
+                    '--disable-hang-monitor',  # 禁用挂起监视器
+                    '--disable-prompt-on-repost',  # 禁用重新发布时的提示
+                    '--disable-sync',  # 禁用同步
+                    '--disable-background-networking',  # 禁用后台网络
+                    '--disable-domain-reliability',  # 禁用域名可靠性
+                    '--disable-client-side-phishing-detection',  # 禁用客户端钓鱼检测
+                    '--disable-background-mode',  # 禁用后台模式
+                    '--metrics-recording-only',  # 仅记录指标
+                    '--disable-infobars',  # 禁用信息栏
+                    '--disable-save-password-bubble',  # 禁用保存密码气泡
+                ]
+                
+                # 真实的User Agent（模拟最新Chrome浏览器）
+                realistic_user_agent = (
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/120.0.0.0 Safari/537.36'
+                )
+                
+                # 使用持久化上下文来保存用户状态
+                self.browser_context = await self.playwright_instance.chromium.launch_persistent_context(
+                    user_data_dir=BROWSER_DATA_DIR,
+                    headless=False,  # 非隐藏模式，方便用户登录
+                    viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+                    timeout=DEFAULT_TIMEOUT,
+                    args=browser_args,  # 添加强化的反检测参数
+                    user_agent=realistic_user_agent,  # 设置真实User Agent
+                    # 额外的反检测配置
+                    locale='zh-CN',  # 设置中文本地化
+                    timezone_id='Asia/Shanghai',  # 设置中国时区
+                    permissions=['geolocation', 'notifications'],  # 授予常见权限
+                    # 屏幕和设备信息
+                    screen={'width': 1920, 'height': 1080},
+                    device_scale_factor=1,
+                    # 禁用自动化标志
+                    ignore_default_args=[
+                        '--enable-automation',
+                        '--no-sandbox',         # 关键：忽略no-sandbox参数，避免安全警告
+                    ],
+                    # 额外参数
+                    extra_http_headers={
+                        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache',
+                        'Sec-Fetch-Site': 'none',
+                        'Sec-Fetch-Mode': 'navigate',
+                        'Sec-Fetch-User': '?1',
+                        'Upgrade-Insecure-Requests': '1',
+                    }
+                )
+                
+                # 创建一个新页面
+                if self.browser_context.pages:
+                    self.main_page = self.browser_context.pages[0]
+                else:
+                    self.main_page = await self.browser_context.new_page()
+                
+                # 设置页面级别的超时时间
+                self.main_page.set_default_timeout(DEFAULT_TIMEOUT)
+                
+                # 高级反检测：注入JavaScript脚本来伪装浏览器环境
+                await self._inject_stealth_scripts()
+                
+                # 额外：隐藏自动化信息栏的CSS注入
+                await self._hide_automation_bar()
+                
+                logger.info("[BrowserManager] 浏览器启动成功")
+                self._browser_healthy = True
+                
+                # 添加浏览器实例创建的时间戳记录（用于限制重启频率）
+                current_time = time.time()
+                self.restart_timestamps.append(current_time)
+                
+                # 成功启动，返回
+                return
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"[BrowserManager] 浏览器启动失败: {error_msg}")
+                
+                # 特殊处理：浏览器实例冲突
+                if "ProcessSingleton" in error_msg or "SingletonLock" in error_msg:
+                    logger.warning("检测到浏览器实例冲突，尝试清理并重试")
+                    await self._handle_singleton_conflict()
+                    # 继续下一次循环重试
+                    continue
+                
+                # 关闭任何可能已创建的实例
                 try:
-                    self.playwright_instance = await async_playwright().start()
-                    self.browser_context = await self.playwright_instance.chromium.launch_persistent_context(
-                        user_data_dir=BROWSER_DATA_DIR,
-                        headless=False,
-                        viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
-                        timeout=DEFAULT_TIMEOUT,
-                        args=browser_args,
-                        user_agent=realistic_user_agent,
-                        locale='zh-CN',
-                        timezone_id='Asia/Shanghai',
-                        permissions=['geolocation', 'notifications'],
-                        screen={'width': 1920, 'height': 1080},
-                        device_scale_factor=1,
-                        ignore_default_args=[
-                            '--enable-automation',
-                            '--no-sandbox',         # 关键：忽略no-sandbox参数，避免安全警告
-                        ],
-                        extra_http_headers={
-                            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                            'Accept-Encoding': 'gzip, deflate, br',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                        }
-                    )
-                    
-                    if self.browser_context.pages:
-                        self.main_page = self.browser_context.pages[0]
-                    else:
-                        self.main_page = await self.browser_context.new_page()
-                    
-                    self.main_page.set_default_timeout(DEFAULT_TIMEOUT)
-                    await self._inject_stealth_scripts()
-                    await self._hide_automation_bar()
-                    logger.info("浏览器实例冲突解决，重启成功")
-                    
-                except Exception as retry_error:
-                    logger.error(f"重试启动浏览器仍然失败: {str(retry_error)}")
-                    raise retry_error
-            else:
-                raise e
+                    if self.browser_context:
+                        await self.browser_context.close()
+                    if self.playwright_instance:
+                        await self.playwright_instance.stop()
+                except Exception:
+                    pass
+                
+                # 重置状态
+                self.browser_context = None
+                self.main_page = None
+                self.playwright_instance = None
+                
+                # 最后一次尝试失败时，抛出异常
+                if restart_count >= max_restart_attempts:
+                    logger.error(f"启动浏览器失败 (尝试 {restart_count}/{max_restart_attempts}): {error_msg}")
+                    raise e
+                
+                # 等待一段时间后重试
+                await asyncio.sleep(1)
+        
+        # 所有重试都失败
+        raise Exception("启动浏览器最终失败，已达到最大重试次数")
     
     async def _inject_stealth_scripts(self):
         """注入超强反检测脚本，完全依靠JavaScript隐藏自动化特征"""
@@ -729,34 +728,68 @@ class BrowserManager:
         """处理浏览器实例冲突"""
         import os
         import shutil
+        import psutil
+        import subprocess
         
         try:
-            # 等待一段时间让其他实例完全关闭
-            await asyncio.sleep(2)
+            logger.info("开始处理浏览器实例冲突...")
             
-            # 清理锁文件
-            singleton_lock_path = os.path.join(BROWSER_DATA_DIR, "SingletonLock")
-            if os.path.exists(singleton_lock_path):
-                try:
-                    os.remove(singleton_lock_path)
-                    logger.info("清理了SingletonLock文件")
-                except Exception as e:
-                    logger.warning(f"清理SingletonLock文件失败: {str(e)}")
-            
-            # 清理其他可能的锁文件
-            lock_files = ["SingletonSocket", "SingletonCookie"]
-            for lock_file in lock_files:
-                lock_path = os.path.join(BROWSER_DATA_DIR, lock_file)
-                if os.path.exists(lock_path):
+            # 1. 强制杀死所有相关的Chromium进程
+            try:
+                # 查找并终止所有与redbook_mcp相关的Chromium进程
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                     try:
+                        cmdline = proc.info.get('cmdline', [])
+                        cmdline_str = ' '.join(cmdline) if cmdline else ''
+                        
+                        # 匹配与当前项目相关的浏览器进程
+                        if ('chromium' in proc.info['name'].lower() or 'chrome' in proc.info['name'].lower()) and 'redbook_mcp' in cmdline_str:
+                            logger.info(f"终止冲突的浏览器进程: PID {proc.info['pid']}")
+                            psutil.Process(proc.info['pid']).terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                
+                # 等待进程完全终止
+                await asyncio.sleep(2)
+            except Exception as e:
+                logger.warning(f"强制杀死浏览器进程时出错: {str(e)}")
+            
+            # 2. 清理锁文件
+            try:
+                lock_files = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
+                for lock_file in lock_files:
+                    lock_path = os.path.join(BROWSER_DATA_DIR, lock_file)
+                    if os.path.exists(lock_path):
                         if os.path.isfile(lock_path):
                             os.remove(lock_path)
                         elif os.path.isdir(lock_path):
                             shutil.rmtree(lock_path)
                         logger.info(f"清理了{lock_file}文件")
-                    except Exception as e:
-                        logger.warning(f"清理{lock_file}文件失败: {str(e)}")
+            except Exception as e:
+                logger.warning(f"清理浏览器锁文件时出错: {str(e)}")
             
+            # 3. 重置浏览器数据目录权限
+            try:
+                # 在Unix系统上重置权限
+                if os.name == 'posix':
+                    os.system(f"chmod -R 755 {BROWSER_DATA_DIR}")
+                    logger.info("重置了浏览器数据目录权限")
+            except Exception as e:
+                logger.warning(f"重置浏览器数据目录权限时出错: {str(e)}")
+            
+            # 4. 清理可能的孤立进程
+            try:
+                if os.name == 'posix':  # macOS/Linux
+                    subprocess.run(['pkill', '-f', 'chromium.*redbook_mcp'], stderr=subprocess.PIPE)
+                elif os.name == 'nt':   # Windows
+                    subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'], stderr=subprocess.PIPE)
+            except Exception as e:
+                logger.warning(f"清理孤立进程时出错: {str(e)}")
+            
+            # 等待所有清理操作完成
+            await asyncio.sleep(1)
+            
+            logger.info("浏览器实例冲突处理完成")
         except Exception as e:
             logger.warning(f"处理浏览器实例冲突时出错: {str(e)}")
     
@@ -931,17 +964,70 @@ class BrowserManager:
         
     async def close(self):
         """关闭浏览器并清理资源"""
+        import os
+        import psutil
+        import subprocess
+        
         try:
-            if self.browser_context:
-                await self.browser_context.close()
-                self.browser_context = None
+            logger.info("执行浏览器关闭")
             
+            # 1. 尝试正常关闭浏览器上下文
+            if self.browser_context:
+                try:
+                    await self.browser_context.close()
+                    logger.info("浏览器上下文正常关闭")
+                except Exception as e:
+                    logger.warning(f"关闭浏览器上下文时出错: {str(e)}")
+            
+            # 2. 停止Playwright实例
             if self.playwright_instance:
-                await self.playwright_instance.stop()
-                self.playwright_instance = None
+                try:
+                    await self.playwright_instance.stop()
+                    logger.info("Playwright实例停止")
+                except Exception as e:
+                    logger.warning(f"停止Playwright实例时出错: {str(e)}")
+            
+            # 3. 强制清理浏览器进程（确保完全释放）
+            try:
+                # 查找并终止所有与redbook_mcp相关的Chromium进程
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        cmdline = proc.info.get('cmdline', [])
+                        cmdline_str = ' '.join(cmdline) if cmdline else ''
+                        
+                        if ('chromium' in proc.info['name'].lower() or 'chrome' in proc.info['name'].lower()) and 'redbook_mcp' in cmdline_str:
+                            logger.info(f"终止剩余的浏览器进程: PID {proc.info['pid']}")
+                            psutil.Process(proc.info['pid']).terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+                
+                # 使用系统命令进行最终清理（以防有进程未被正确终止）
+                if os.name == 'posix':  # macOS/Linux
+                    subprocess.run(['pkill', '-f', 'chromium.*redbook_mcp'], stderr=subprocess.PIPE)
+                elif os.name == 'nt':   # Windows
+                    subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'], stderr=subprocess.PIPE)
+            except Exception as e:
+                logger.warning(f"强制清理浏览器进程时出错: {str(e)}")
+                
+            # 4. 清理锁文件
+            try:
+                import shutil
+                lock_files = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
+                for lock_file in lock_files:
+                    lock_path = os.path.join(BROWSER_DATA_DIR, lock_file)
+                    if os.path.exists(lock_path):
+                        if os.path.isfile(lock_path):
+                            os.remove(lock_path)
+                        elif os.path.isdir(lock_path):
+                            shutil.rmtree(lock_path)
+                        logger.info(f"清理了{lock_file}文件")
+            except Exception as e:
+                logger.warning(f"清理锁文件时出错: {str(e)}")
                 
             # 重置状态
             self.main_page = None
+            self.browser_context = None
+            self.playwright_instance = None
             self.is_logged_in = False
             self._browser_healthy = False
             

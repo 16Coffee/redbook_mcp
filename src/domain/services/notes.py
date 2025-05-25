@@ -5,6 +5,7 @@ import asyncio
 import json
 import re
 from src.core.base.utils import extract_text, parse_note_content, detect_domain, extract_keywords
+from src.core.logging.logger import logger
 
 
 class NoteManager:
@@ -47,6 +48,8 @@ class NoteManager:
             post_data = []
             found_count = 0
             
+            from src.infrastructure.cache.cache import cache_manager
+            
             for card in post_cards:
                 if found_count >= limit:
                     break
@@ -73,6 +76,11 @@ class NoteManager:
                                 xsec_token = xsec_token_match.group(1)
                                 # 构造explore格式的URL
                                 full_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source="
+                                
+                                # 将带token的URL缓存起来，以便其他函数使用
+                                # 缓存两种格式：完整URL和note_id->URL映射
+                                await cache_manager.set(f"note_url:{note_id}", full_url, ttl=3600)  # 缓存1小时
+                                logger.debug(f"已缓存笔记URL: {note_id} -> {full_url}")
                             else:
                                 # 如果没有xsec_token，使用原始URL
                                 full_url = f"https://www.xiaohongshu.com{href}"
@@ -196,6 +204,34 @@ class NoteManager:
             return "请先登录小红书账号"
         
         try:
+            # 验证URL格式并进行必要的修正
+            if not url:
+                return "错误：请提供有效的笔记URL"
+            
+            # 检查URL是否包含xsec_token参数
+            if 'xsec_token=' not in url:
+                logger.warning(f"URL不包含xsec_token参数，尝试提取笔记ID并重构URL: {url}")
+                
+                import re
+                
+                # 尝试提取笔记ID（从explore/或者任何路径中）
+                note_id_match = re.search(r'/([a-f0-9]{24})', url)
+                if not note_id_match:
+                    return "错误：无法从URL中提取笔记ID。请使用搜索功能获取的完整URL，确保包含xsec_token参数。"
+                
+                note_id = note_id_match.group(1)
+                
+                # 尝试从全局缓存中查找此ID对应的带token的URL
+                from src.infrastructure.cache.cache import cache_manager
+                cached_url = await cache_manager.get(f"note_url:{note_id}")
+                
+                if cached_url and 'xsec_token=' in cached_url:
+                    logger.info(f"已从缓存中找到带token的URL: {cached_url}")
+                    url = cached_url
+                else:
+                    # 无法自动获取token，返回错误提示
+                    return "错误：笔记URL必须包含xsec_token参数。请先使用search_notes功能获取带token的完整URL。"
+            
             # 访问帖子链接
             await self.browser.goto(url, wait_time=8)
             
@@ -273,6 +309,34 @@ class NoteManager:
             return "请先登录小红书账号"
         
         try:
+            # 验证URL格式并进行必要的修正
+            if not url:
+                return "错误：请提供有效的笔记URL"
+            
+            # 检查URL是否包含xsec_token参数
+            if 'xsec_token=' not in url:
+                logger.warning(f"get_note_comments: URL不包含xsec_token参数，尝试提取笔记ID并重构URL: {url}")
+                
+                import re
+                
+                # 尝试提取笔记ID（从explore/或者任何路径中）
+                note_id_match = re.search(r'/([a-f0-9]{24})', url)
+                if not note_id_match:
+                    return "错误：无法从URL中提取笔记ID。请使用搜索功能获取的完整URL，确保包含xsec_token参数。"
+                
+                note_id = note_id_match.group(1)
+                
+                # 尝试从全局缓存中查找此ID对应的带token的URL
+                from src.infrastructure.cache.cache import cache_manager
+                cached_url = await cache_manager.get(f"note_url:{note_id}")
+                
+                if cached_url and 'xsec_token=' in cached_url:
+                    logger.info(f"已从缓存中找到带token的URL: {cached_url}")
+                    url = cached_url
+                else:
+                    # 无法自动获取token，返回错误提示
+                    return "错误：笔记URL必须包含xsec_token参数。请先使用search_notes功能获取带token的完整URL。"
+            
             # 访问帖子链接
             await self.browser.goto(url, wait_time=5)
             
@@ -544,46 +608,132 @@ class NoteManager:
             url (str): 笔记 URL
         
         Returns:
-            dict: 分析结果
+            dict: 包含分析结果的字典
         """
         login_status = await self.browser.ensure_browser()
         if not login_status:
             return {"error": "请先登录小红书账号"}
         
         try:
-            # 直接调用get_note_content获取笔记内容
-            note_content_result = await self.get_note_content(url)
+            # 验证URL格式并进行必要的修正
+            if not url:
+                return {"error": "请提供有效的笔记URL"}
             
-            # 检查是否获取成功
-            if note_content_result.startswith("请先登录") or note_content_result.startswith("获取笔记内容时出错"):
-                return {"error": note_content_result}
+            # 检查URL是否包含xsec_token参数
+            if 'xsec_token=' not in url:
+                logger.warning(f"analyze_note: URL不包含xsec_token参数，尝试提取笔记ID并重构URL: {url}")
+                
+                import re
+                
+                # 尝试提取笔记ID（从explore/或者任何路径中）
+                note_id_match = re.search(r'/([a-f0-9]{24})', url)
+                if not note_id_match:
+                    return {"error": "无法从URL中提取笔记ID。请使用搜索功能获取的完整URL，确保包含xsec_token参数。"}
+                
+                note_id = note_id_match.group(1)
+                
+                # 尝试从全局缓存中查找此ID对应的带token的URL
+                from src.infrastructure.cache.cache import cache_manager
+                cached_url = await cache_manager.get(f"note_url:{note_id}")
+                
+                if cached_url and 'xsec_token=' in cached_url:
+                    logger.info(f"已从缓存中找到带token的URL: {cached_url}")
+                    url = cached_url
+                else:
+                    # 无法自动获取token，返回错误提示
+                    return {"error": "笔记URL必须包含xsec_token参数。请先使用search_notes功能获取带token的完整URL。"}
             
-            # 解析获取到的笔记内容
-            post_content = parse_note_content(note_content_result)
+            # 访问帖子链接
+            await self.browser.goto(url, wait_time=8)
             
-            # 检测笔记领域
-            detected_domains = detect_domain(
-                post_content.get("标题", ""), 
-                post_content.get("内容", "")
-            )
+            # 滚动页面以确保加载所有内容
+            await self.browser.main_page.evaluate('''
+                () => {
+                    window.scrollTo(0, document.body.scrollHeight);
+                    setTimeout(() => { window.scrollTo(0, document.body.scrollHeight / 2); }, 1000);
+                    setTimeout(() => { window.scrollTo(0, 0); }, 2000);
+                }
+            ''')
+            await asyncio.sleep(3)
             
-            # 提取关键词
-            keywords = extract_keywords(
-                f"{post_content.get('标题', '')} {post_content.get('内容', '')}"
-            )
+            # 获取页面文本内容
+            page_text = await self.browser.main_page.evaluate('() => document.body.innerText')
             
-            # 返回分析结果
-            return {
-                "url": url,
-                "标题": post_content.get("标题", "未知标题"),
-                "作者": post_content.get("作者", "未知作者"),
-                "内容": post_content.get("内容", "未能获取内容"),
-                "领域": detected_domains,
-                "关键词": keywords
+            # 提取笔记信息
+            note_info = await self.browser.main_page.evaluate('''
+                () => {
+                    // 尝试获取标题
+                    let title = "";
+                    const titleSelectors = ['#detail-title', 'div.title', 'h1', '.note-content .title'];
+                    for (const selector of titleSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.textContent.trim()) {
+                            title = el.textContent.trim();
+                            break;
+                        }
+                    }
+                    
+                    // 尝试获取作者
+                    let author = "";
+                    const authorSelectors = ['.user-nickname', '.author-nickname', '.nickname', 'span.username'];
+                    for (const selector of authorSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.textContent.trim()) {
+                            author = el.textContent.trim();
+                            break;
+                        }
+                    }
+                    
+                    // 尝试获取内容
+                    let content = "";
+                    const contentSelectors = ['.note-content', '#detail-desc', 'div.content', 'div.desc'];
+                    for (const selector of contentSelectors) {
+                        const el = document.querySelector(selector);
+                        if (el && el.textContent.trim()) {
+                            content = el.textContent.trim();
+                            break;
+                        }
+                    }
+                    
+                    // 提取话题标签
+                    const topics = [];
+                    const topicSelectors = ['.tag-item', '.topic-item', '.hash-tag'];
+                    for (const selector of topicSelectors) {
+                        const elements = document.querySelectorAll(selector);
+                        elements.forEach(el => {
+                            if (el && el.textContent.trim()) {
+                                topics.push(el.textContent.trim());
+                            }
+                        });
+                    }
+                    
+                    return {
+                        title: title || "未知标题",
+                        author: author || "未知作者",
+                        content: content || "未能获取内容",
+                        topics: topics
+                    };
+                }
+            ''')
+            
+            # 提取图片
+            images = await self._extract_images()
+            
+            # 构造结果
+            result = {
+                "标题": note_info['title'],
+                "作者": note_info['author'],
+                "内容": note_info['content'],
+                "话题标签": note_info['topics'],
+                "图片数量": len(images),
+                "页面文本概要": page_text[:500] + "..." if len(page_text) > 500 else page_text,
+                "URL": url
             }
-        
+            
+            return result
+            
         except Exception as e:
-            return {"error": f"分析笔记内容时出错: {str(e)}"}
+            return {"error": f"分析笔记时出错: {str(e)}"}
 
 
 # 添加同步封装函数，便于 main.py 中调用

@@ -4,7 +4,8 @@ MCP工具模块，提供小红书评论相关的MCP接口
 import asyncio
 from fastmcp import FastMCP
 from src.infrastructure.browser.browser import BrowserManager
-from src.domain.services.comment_handler import CommentHandler
+from src.domain.services.comments import CommentManager
+from src.domain.services.notes import NoteManager
 from src.core.config.config import COMMENT_GUIDES
 
 # 初始化 MCP
@@ -201,11 +202,12 @@ async def post_comment(url: str, comment: str) -> str:
             if "成功" not in login_result:
                 return f"登录失败: {login_result}"
         
-        # 创建评论处理器
-        comment_handler = CommentHandler(browser_manager.main_page)
+        # 创建评论管理器
+        note_manager = NoteManager(browser_manager)
+        comment_manager = CommentManager(browser_manager, note_manager)
         
         # 发布评论
-        result = await comment_handler.post_comment(url, comment)
+        result = await comment_manager.post_comment(url, comment)
         return result
         
     except Exception as e:
@@ -232,6 +234,7 @@ async def post_smart_comment(url: str, comment_type: str = "引流") -> dict:
         # 导入笔记模块
         from src.domain.services.notes import NoteManager
         note_manager = NoteManager(browser_manager)
+        comment_manager = CommentManager(browser_manager, note_manager)
         
         # 获取笔记内容
         note_info = await note_manager.analyze_note(url)
@@ -251,36 +254,115 @@ async def post_smart_comment(url: str, comment_type: str = "引流") -> dict:
     except Exception as e:
         return {"error": f"智能评论分析失败: {str(e)}"}
 
-@mcp.tool()
-async def clear_cache() -> str:
-    """清空所有缓存
-    
-    Returns:
-        str: 清理结果
-    """
-    try:
-        # 清理全局浏览器实例
-        global _global_browser_manager
-        if _global_browser_manager:
-            await _global_browser_manager.close()
-            _global_browser_manager = None
-        
-        # 清理其他缓存...（如果有的话）
-        
-        return "缓存清理完成"
-        
-    except Exception as e:
-        return f"清理缓存时出错: {str(e)}"
+# ===========================================
+# 内部缓存管理功能（不对外暴露为MCP工具）
+# ===========================================
 
-@mcp.tool()
-async def cleanup_expired_cache() -> str:
-    """清理过期缓存
+class CacheManager:
+    """内部缓存管理器，用于程序鲁棒性维护"""
     
-    Returns:
-        str: 清理结果
-    """
-    # 这里可以实现过期缓存的清理逻辑
-    return "过期缓存清理完成"
+    @staticmethod
+    async def clear_all_cache() -> str:
+        """清空所有缓存
+        
+        Returns:
+            str: 清理结果
+        """
+        try:
+            # 清理全局浏览器实例
+            global _global_browser_manager
+            if _global_browser_manager:
+                await _global_browser_manager.close()
+                _global_browser_manager = None
+            
+            # 清理其他缓存...（如果有的话）
+            import shutil
+            import os
+            from src.core.config.config import config
+            
+            # 清理临时缓存目录
+            cache_dirs = [
+                config.paths.data_dir / "cache",
+                config.paths.data_dir / "temp",
+            ]
+            
+            for cache_dir in cache_dirs:
+                if cache_dir.exists():
+                    shutil.rmtree(cache_dir)
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            return "缓存清理完成"
+            
+        except Exception as e:
+            return f"清理缓存时出错: {str(e)}"
+    
+    @staticmethod
+    async def cleanup_expired_cache() -> str:
+        """清理过期缓存
+        
+        Returns:
+            str: 清理结果
+        """
+        try:
+            import os
+            import time
+            from src.core.config.config import config
+            
+            # 清理过期的cookie备份文件（保留最新5个）
+            cookie_backup_dir = config.paths.data_dir / "cookie_backups"
+            if cookie_backup_dir.exists():
+                backup_files = sorted(
+                    cookie_backup_dir.glob("*.json"),
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True
+                )
+                # 删除超过5个的旧备份
+                for old_backup in backup_files[5:]:
+                    old_backup.unlink()
+            
+            # 清理超过7天的日志文件
+            log_dir = config.paths.logs_dir
+            if log_dir.exists():
+                current_time = time.time()
+                for log_file in log_dir.glob("*.log"):
+                    if current_time - log_file.stat().st_mtime > 7 * 24 * 3600:  # 7天
+                        log_file.unlink()
+            
+            # 清理临时文件
+            temp_patterns = ["*.tmp", "*.temp", "*~"]
+            for pattern in temp_patterns:
+                for temp_file in config.paths.base_dir.glob(f"**/{pattern}"):
+                    if temp_file.is_file():
+                        temp_file.unlink()
+            
+            return "过期缓存清理完成"
+            
+        except Exception as e:
+            return f"清理过期缓存时出错: {str(e)}"
+    
+    @staticmethod
+    async def auto_cleanup():
+        """自动清理任务，程序启动时或定期调用"""
+        try:
+            # 清理过期缓存
+            await CacheManager.cleanup_expired_cache()
+            print("自动缓存清理完成")
+        except Exception as e:
+            print(f"自动缓存清理失败: {e}")
+
+# 程序启动时的自动清理
+async def _startup_cleanup():
+    """启动时的自动清理"""
+    await CacheManager.auto_cleanup()
+
+# 向后兼容的函数（内部使用）
+async def clear_cache() -> str:
+    """清空所有缓存（内部函数，不对外暴露）"""
+    return await CacheManager.clear_all_cache()
+
+async def cleanup_expired_cache() -> str:
+    """清理过期缓存（内部函数，不对外暴露）"""
+    return await CacheManager.cleanup_expired_cache()
 
 # 同步封装函数，用于直接在Python中调用
 def sync_post_comment(url: str, comment: str) -> str:

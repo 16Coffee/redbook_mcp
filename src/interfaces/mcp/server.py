@@ -32,8 +32,15 @@ publish_manager = PublishManager(browser_manager)
 async def cleanup_resources():
     """清理资源"""
     try:
+        # 执行缓存清理
+        await _internal_cache_cleanup()
+        
+        # 清理浏览器资源
         await browser_manager.close()
+        
+        # 清理缓存管理器
         await cache_manager.cleanup_expired()
+        
         logger.info("资源清理完成")
     except Exception as e:
         logger.error(f"资源清理失败: {str(e)}")
@@ -201,44 +208,106 @@ async def publish_note(title: str, content: str, media_paths: list, topics: list
         logger.error(error_msg)
         return error_msg
 
-@mcp.tool()
-async def clear_cache():
-    """清空所有缓存
-    
-    Returns:
-        str: 清理结果
-    """
-    try:
-        await cache_manager.clear()
-        logger.info("手动清空缓存完成")
-        return "缓存已清空"
-    except Exception as e:
-        error_msg = f"清空缓存失败: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
+# ===========================================
+# 内部清理功能（不对外暴露为MCP工具）
+# ===========================================
 
-@mcp.tool()
-async def cleanup_expired_cache():
-    """清理过期缓存
-    
-    Returns:
-        str: 清理结果
-    """
+async def _internal_cache_cleanup():
+    """内部缓存清理功能，用于程序启动时和定期维护"""
     try:
+        # 清理过期缓存
         count = await cache_manager.cleanup_expired()
-        result = f"已清理 {count} 个过期缓存"
-        logger.info(result)
-        return result
+        logger.info(f"启动时清理了 {count} 个过期缓存")
+        
+        # 清理旧的日志文件
+        import time
+        log_dir = config.paths.logs_dir
+        if log_dir.exists():
+            current_time = time.time()
+            for log_file in log_dir.glob("*.log"):
+                if current_time - log_file.stat().st_mtime > 7 * 24 * 3600:  # 7天
+                    log_file.unlink()
+                    logger.info(f"清理旧日志文件: {log_file.name}")
+        
+        # 清理临时文件
+        temp_patterns = ["*.tmp", "*.temp", "*~"]
+        for pattern in temp_patterns:
+            for temp_file in config.paths.base_dir.glob(f"**/{pattern}"):
+                if temp_file.is_file():
+                    temp_file.unlink()
+                    logger.debug(f"清理临时文件: {temp_file}")
+        
+        logger.info("自动缓存清理完成")
     except Exception as e:
-        error_msg = f"清理过期缓存失败: {str(e)}"
-        logger.error(error_msg)
-        return error_msg
+        logger.error(f"自动缓存清理失败: {e}")
 
 def main():
     """主函数入口"""
     try:
         # 初始化并运行服务器
         logger.info("启动小红书MCP服务器...")
+        
+        # 启动前清理可能存在的浏览器进程和锁文件
+        try:
+            import os
+            import shutil
+            import psutil
+            import subprocess
+            import time
+            
+            logger.info("执行启动前清理...")
+            
+            # 1. 清理可能存在的浏览器进程
+            killed_processes = 0
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = proc.info.get('cmdline', [])
+                    cmdline_str = ' '.join(cmdline) if cmdline else ''
+                    
+                    # 匹配与当前项目相关的浏览器进程
+                    if ('chromium' in proc.info['name'].lower() or 'chrome' in proc.info['name'].lower()) and 'redbook_mcp' in cmdline_str:
+                        proc.terminate()
+                        killed_processes += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            
+            if killed_processes > 0:
+                logger.info(f"已终止 {killed_processes} 个遗留的浏览器进程")
+                # 等待进程完全终止
+                time.sleep(1)
+            
+            # 2. 系统级清理命令
+            if os.name == 'posix':  # macOS/Linux
+                subprocess.run(['pkill', '-f', 'chromium.*redbook_mcp'], stderr=subprocess.PIPE)
+            elif os.name == 'nt':   # Windows
+                subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'], stderr=subprocess.PIPE)
+            
+            # 3. 清理锁文件
+            browser_data_dir = config.paths.browser_data_dir
+            lock_files = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
+            for lock_file in lock_files:
+                lock_path = os.path.join(browser_data_dir, lock_file)
+                if os.path.exists(lock_path):
+                    try:
+                        if os.path.isfile(lock_path):
+                            os.remove(lock_path)
+                        elif os.path.isdir(lock_path):
+                            shutil.rmtree(lock_path)
+                        logger.info(f"清理了 {lock_file} 文件")
+                    except Exception as e:
+                        logger.warning(f"清理 {lock_file} 失败: {str(e)}")
+            
+            logger.info("启动前清理完成")
+            
+        except Exception as e:
+            logger.warning(f"启动前清理失败，继续启动: {str(e)}")
+        
+        # 启动时执行自动清理
+        try:
+            asyncio.run(_internal_cache_cleanup())
+        except Exception as e:
+            logger.warning(f"启动清理失败，继续启动服务器: {e}")
+        
         logger.info("请在MCP客户端（如Claude for Desktop）中配置此服务器")
         
         # 注册清理函数
