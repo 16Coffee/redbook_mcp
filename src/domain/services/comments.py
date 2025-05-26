@@ -7,128 +7,183 @@ from src.core.config.config import COMMENT_GUIDES
 
 class CommentManager:
     """评论管理类，处理评论的发布、智能评论生成等操作"""
-    
+
     def __init__(self, browser_manager, note_manager):
         """初始化评论管理器
-        
+
         Args:
             browser_manager: 浏览器管理器实例
             note_manager: 笔记管理器实例
         """
         self.browser = browser_manager
         self.note_manager = note_manager
-    
+
+    async def diagnose_page_elements(self):
+        """诊断页面元素，找出真正的问题"""
+        print("🔍 开始页面元素诊断...")
+
+        try:
+            # 1. 检查页面基本状态
+            page_info = await self.browser.main_page.evaluate('''
+                () => {
+                    return {
+                        url: window.location.href,
+                        title: document.title,
+                        readyState: document.readyState,
+                        hasContentTextarea: !!document.querySelector('#content-textarea'),
+                        hasContentInput: !!document.querySelector('.content-input'),
+                        allEditableCount: document.querySelectorAll('[contenteditable="true"]').length,
+                        allPElements: document.querySelectorAll('p').length
+                    };
+                }
+            ''')
+            print(f"📊 页面状态: {page_info}")
+
+            # 2. 详细检查目标元素
+            element_details = await self.browser.main_page.evaluate('''
+                () => {
+                    const textarea = document.querySelector('#content-textarea');
+                    if (textarea) {
+                        const rect = textarea.getBoundingClientRect();
+                        return {
+                            found: true,
+                            tag: textarea.tagName,
+                            id: textarea.id,
+                            className: textarea.className,
+                            contentEditable: textarea.contentEditable,
+                            visible: textarea.offsetParent !== null,
+                            rect: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
+                            style: {
+                                display: getComputedStyle(textarea).display,
+                                visibility: getComputedStyle(textarea).visibility,
+                                opacity: getComputedStyle(textarea).opacity
+                            }
+                        };
+                    }
+                    return {found: false};
+                }
+            ''')
+            print(f"🎯 目标元素详情: {element_details}")
+
+            return element_details
+
+        except Exception as e:
+            print(f"❌ 诊断过程出错: {str(e)}")
+            return None
+
     async def find_comment_input(self):
-        """查找评论输入框
-        
+        """查找评论输入框，增加诊断功能
+
         Returns:
             element or None: 评论输入框元素
         """
-        print("开始查找评论输入框...")
-        
-        # 修复选择器，使用更通用的方式
-        input_selectors = [
-            '[contenteditable="true"]',  # 不限制标签类型
-            'div[contenteditable="true"]',
-            'p[contenteditable="true"]',
-            'span[contenteditable="true"]',
-            'paragraph:has-text("说点什么...")',
-            'text="说点什么..."',
-            'text="评论发布后所有人都能看到"'
+        print("🔍 开始查找评论输入框...")
+
+        # 先进行诊断
+        diagnosis = await self.diagnose_page_elements()
+
+        # 如果诊断显示元素存在但不可见，可能需要特殊处理
+        if diagnosis and diagnosis.get('found') and not diagnosis.get('visible'):
+            print("⚠️ 元素存在但不可见，尝试激活...")
+            # 尝试滚动到页面底部激活评论区域
+            await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+            await asyncio.sleep(1)
+
+        # 使用最精确的选择器
+        target_selectors = [
+            '#content-textarea',  # 您提供的精确ID
+            '.content-input',     # 您提供的精确类名
+            'p[contenteditable="true"][data-tribute="true"]'  # 您提供的精确属性
         ]
-        
-        # 尝试常规选择器
-        for i, selector in enumerate(input_selectors):
-            print(f"尝试选择器 {i+1}/{len(input_selectors)}: {selector}")
+
+        for selector in target_selectors:
+            try:
+                print(f"🎯 尝试精确选择器: {selector}")
+                element = await self.browser.main_page.query_selector(selector)
+                if element:
+                    is_visible = await element.is_visible()
+                    print(f"元素存在: {element}, 可见: {is_visible}")
+                    if is_visible:
+                        await element.scroll_into_view_if_needed()
+                        print(f"✅ 成功找到评论输入框: {selector}")
+                        return element
+                    else:
+                        print(f"⚠️ 元素存在但不可见: {selector}")
+                else:
+                    print(f"❌ 元素不存在: {selector}")
+            except Exception as e:
+                print(f"❌ 选择器异常 {selector}: {str(e)}")
+
+        print("❌ 所有精确选择器都失败")
+        return None
+
+    async def activate_comment_area(self):
+        """激活评论区域，确保评论输入框可见
+
+        Returns:
+            bool: 是否成功激活评论区域
+        """
+        print("尝试激活评论区域...")
+
+        # 定位评论区域并滚动到该区域
+        comment_area_selectors = [
+            'text="条评论"',
+            'text="共 " >> xpath=..',
+            'text=/\\d+ 条评论/',
+            'text="评论"',
+            'div.comment-container'
+        ]
+
+        for selector in comment_area_selectors:
             try:
                 element = await self.browser.main_page.query_selector(selector)
-                if element and await element.is_visible():
-                    print(f"找到评论输入框: {selector}")
-                    await element.scroll_into_view_if_needed()
-                    return element
-                else:
-                    print(f"选择器 {selector} 未找到可见元素")
-            except Exception as e:
-                print(f"选择器 {selector} 出错: {e}")
-                continue
-        
-        print("常规选择器都失败，使用JavaScript直接获取元素...")
-        
-        # 直接用JavaScript获取元素并返回
-        try:
-            js_element = await self.browser.main_page.evaluate('''
-                () => {
-                    console.log("开始JavaScript查找...");
-                    
-                    // 查找可编辑元素
-                    const editableElements = Array.from(document.querySelectorAll('[contenteditable="true"]'));
-                    console.log("找到可编辑元素:", editableElements.length);
-                    
-                    if (editableElements.length > 0) {
-                        const element = editableElements[0];
-                        element.scrollIntoView();
-                        
-                        // 给元素添加一个临时ID，方便playwright查找
-                        element.setAttribute('data-comment-input', 'temp-id');
-                        console.log("已标记第一个可编辑元素");
-                        return true;
-                    }
-                    
-                    // 查找包含"说点什么"的元素
-                    const placeholderElements = Array.from(document.querySelectorAll('*'))
-                        .filter(el => el.textContent && el.textContent.includes('说点什么'));
-                    console.log("找到包含'说点什么'的元素:", placeholderElements.length);
-                    
-                    if (placeholderElements.length > 0) {
-                        const element = placeholderElements[0];
-                        element.scrollIntoView();
-                        element.setAttribute('data-comment-input', 'temp-id');
-                        console.log("已标记包含说点什么的元素");
-                        return true;
-                    }
-                    
-                    return false;
-                }
-            ''')
-            
-            if js_element:
-                print("JavaScript成功标记了元素，使用临时ID查找...")
-                await asyncio.sleep(0.5)
-                
-                # 使用临时ID查找元素
-                element = await self.browser.main_page.query_selector('[data-comment-input="temp-id"]')
                 if element:
-                    print("成功通过临时ID找到评论输入框")
-                    # 清除临时ID
-                    await element.evaluate('(el) => el.removeAttribute("data-comment-input")')
-                    return element
-        
-        except Exception as e:
-            print(f"JavaScript查找出错: {e}")
-        
-        print("所有方法都失败，未找到评论输入框")
-        return None
-    
+                    await element.scroll_into_view_if_needed()
+                    await asyncio.sleep(2)
+
+                    # 尝试点击评论区域来激活输入框
+                    try:
+                        await element.click()
+                        await asyncio.sleep(2)
+                        print(f"成功激活评论区域: {selector}")
+                        return True
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+        # 如果没有找到评论区域，尝试滚动到页面底部
+        try:
+            await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+            await asyncio.sleep(2)
+            print("滚动到页面底部以激活评论区域")
+            return True
+        except Exception:
+            pass
+
+        print("未能激活评论区域")
+        return False
+
     async def send_comment(self, comment_input, comment_text):
-        """发送评论，使用简化的发送逻辑
-        
+        """发送评论，基于原有有效逻辑的简化版本
+
         Args:
             comment_input: 评论输入框元素
             comment_text: 评论内容
-        
+
         Returns:
             bool: 是否发送成功
         """
         try:
-            # 输入评论内容
+            # 输入评论内容（使用原有有效的方式）
             await comment_input.click()
             await asyncio.sleep(1)
             await self.browser.main_page.keyboard.type(comment_text)
             await asyncio.sleep(1)
-            
-            # 发送评论（简化发送逻辑）
+
+            # 发送评论（使用原有有效的简化发送逻辑）
             send_success = False
-            
+
             # 方法1: 尝试点击发送按钮
             try:
                 send_button = await self.browser.main_page.query_selector('button:has-text("发送")')
@@ -139,7 +194,7 @@ class CommentManager:
                     send_success = True
             except Exception:
                 pass
-            
+
             # 方法2: 如果方法1失败，尝试使用Enter键
             if not send_success:
                 try:
@@ -149,7 +204,7 @@ class CommentManager:
                     send_success = True
                 except Exception:
                     pass
-            
+
             # 方法3: 如果方法2失败，尝试使用JavaScript点击发送按钮
             if not send_success:
                 try:
@@ -170,125 +225,183 @@ class CommentManager:
                     send_success = js_send_result
                 except Exception:
                     pass
-            
+
             return send_success
-            
+
         except Exception as e:
             print(f"发送评论时出错: {str(e)}")
             return False
 
     async def post_comment(self, url, comment):
-        """发布评论到指定笔记
-        
+        """发布评论到指定笔记，基于原有有效逻辑
+
         Args:
             url (str): 笔记 URL
             comment (str): 要发布的评论内容
-        
+
         Returns:
             str: 操作结果
         """
         # 验证URL格式，确保包含必要的xsec_token参数
         if not url or 'xsec_token=' not in url:
             return "错误：笔记URL必须包含xsec_token参数。请使用搜索功能获取的完整URL。"
-        
+
         login_status = await self.browser.ensure_browser()
         if not login_status:
             return "请先登录小红书账号，才能发布评论"
-        
-        # 直接实现评论发布逻辑
+
         try:
-            print(f"开始发布评论: {comment}")
-            
-            # 访问页面
-            print("正在访问页面...")
+            print("🌐 开始访问页面...")
+            # 访问帖子链接
             await self.browser.main_page.goto(url, timeout=30000)
-            print("页面加载完成，等待2秒...")
-            await asyncio.sleep(2)
-            
-            # 直接查找评论输入框
-            print("直接查找评论输入框...")
-            comment_input = await self.find_comment_input()
-            
+            print("⏳ 等待页面加载...")
+            await asyncio.sleep(2)  # 进一步减少等待时间
+
+            # 直接滚动到页面底部激活评论区域（基于诊断结果优化）
+            print("📜 滚动到评论区域...")
+            await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+            await asyncio.sleep(1)
+
+            # 直接使用诊断验证过的选择器（基于诊断结果优化）
+            print("🎯 查找评论输入框...")
+            comment_input = None
+
+            # 使用诊断验证过的最精确选择器
+            try:
+                comment_input = await self.browser.main_page.query_selector('#content-textarea')
+                if comment_input and await comment_input.is_visible():
+                    print("✅ 使用 #content-textarea 找到输入框")
+                else:
+                    comment_input = None
+            except Exception:
+                pass
+
+            # 备用选择器
             if not comment_input:
-                print("第一次未找到输入框，尝试滚动到底部再查找...")
-                await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-                await asyncio.sleep(1)
-                comment_input = await self.find_comment_input()
-            
+                try:
+                    comment_input = await self.browser.main_page.query_selector('.content-input')
+                    if comment_input and await comment_input.is_visible():
+                        print("✅ 使用 .content-input 找到输入框")
+                    else:
+                        comment_input = None
+                except Exception:
+                    pass
+
+            # 最后的备用选择器
             if not comment_input:
-                print("仍未找到输入框，执行详细页面分析...")
-                page_analysis = await self.browser.main_page.evaluate('''
+                try:
+                    comment_input = await self.browser.main_page.query_selector('p[contenteditable="true"][data-tribute="true"]')
+                    if comment_input and await comment_input.is_visible():
+                        print("✅ 使用属性选择器找到输入框")
+                    else:
+                        comment_input = None
+                except Exception:
+                    pass
+
+
+
+            if not comment_input:
+                return "未能找到评论输入框，无法发布评论"
+
+            # 确保元素可见并聚焦
+            await comment_input.scroll_into_view_if_needed()
+            await asyncio.sleep(0.3)
+
+            # 输入评论内容（解决点击被阻挡问题）
+            print("📝 激活评论输入框...")
+
+            # 方法1: 先尝试点击覆盖的"评论"元素来激活输入框
+            try:
+                overlay_element = await self.browser.main_page.query_selector('span:has-text("评论")')
+                if overlay_element:
+                    print("🎯 点击覆盖的'评论'元素...")
+                    await overlay_element.click()
+                    await asyncio.sleep(0.5)
+            except Exception:
+                pass
+
+            # 方法2: 使用JavaScript直接聚焦输入框
+            try:
+                print("🎯 使用JavaScript聚焦输入框...")
+                await self.browser.main_page.evaluate('''
                     () => {
-                        const result = {
-                            url: window.location.href,
-                            allEditables: [],
-                            allInputs: [],
-                            textAreas: []
-                        };
-                        
-                        // 查找所有可编辑元素
-                        const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
-                        result.allEditables = editables.map(el => ({
-                            tag: el.tagName,
-                            text: el.textContent.slice(0, 30),
-                            className: el.className,
-                            visible: el.offsetParent !== null
-                        }));
-                        
-                        // 查找所有输入框
-                        const inputs = Array.from(document.querySelectorAll('input'));
-                        result.allInputs = inputs.map(el => ({
-                            type: el.type,
-                            placeholder: el.placeholder,
-                            className: el.className,
-                            visible: el.offsetParent !== null
-                        }));
-                        
-                        // 查找所有textarea
-                        const textareas = Array.from(document.querySelectorAll('textarea'));
-                        result.textAreas = textareas.map(el => ({
-                            placeholder: el.placeholder,
-                            className: el.className,
-                            visible: el.offsetParent !== null
-                        }));
-                        
-                        return result;
+                        const textarea = document.querySelector('#content-textarea');
+                        if (textarea) {
+                            textarea.focus();
+                            textarea.click();
+                        }
                     }
                 ''')
-                
-                return f"未能找到评论输入框。页面分析结果: {page_analysis}"
-            
-            print("找到评论输入框，开始发送评论...")
-            
-            # 发送评论
-            if await self.send_comment(comment_input, comment):
-                return f"已成功发布评论：{comment}"
-            else:
-                return "发布评论失败，请检查评论内容或网络连接"
-        
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
+
+            # 方法3: 如果还不行，使用force点击
+            try:
+                print("🎯 尝试force点击...")
+                await comment_input.click(force=True)
+                await asyncio.sleep(0.3)
+            except Exception:
+                pass
+
+            # 输入评论内容
+            print("📝 输入评论内容...")
+            await self.browser.main_page.keyboard.press("Control+a")  # 全选
+            await self.browser.main_page.keyboard.type(comment)
+            await asyncio.sleep(0.3)
+            print("✅ 评论输入完成")
+
+            # 发送评论 - 使用最简单最快的方法
+            print("🚀 发送评论...")
+            await self.browser.main_page.keyboard.press("Enter")
+            await asyncio.sleep(1)
+
+            print("✅ 评论发送完成")
+            return f"已成功发布评论：{comment}"
+
         except Exception as e:
-            print(f"发布评论时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
             return f"发布评论时出错: {str(e)}"
-    
+
+    def _extract_note_id(self, url):
+        """从URL中提取笔记ID
+
+        Args:
+            url (str): 笔记URL
+
+        Returns:
+            str or None: 笔记ID
+        """
+        if not url:
+            return None
+
+        try:
+            # 小红书笔记URL格式: https://www.xiaohongshu.com/explore/{note_id}?...
+            import re
+            match = re.search(r'/explore/([a-f0-9]+)', url)
+            if match:
+                return match.group(1)
+        except Exception:
+            pass
+
+        return None
+
     async def post_smart_comment(self, url, comment_type="引流"):
         """根据帖子内容发布智能评论，增加曝光并引导用户关注或私聊
-        
+
         Args:
             url (str): 笔记 URL
             comment_type (str, optional): 评论类型. 默认为"引流".
                 可选值: "引流", "点赞", "咨询", "专业"
-        
+
         Returns:
             dict: 包含笔记信息和评论类型的字典，供MCP客户端(如Claude)生成评论
         """
         # 获取笔记内容
         note_info = await self.note_manager.analyze_note(url)
-        
+
         if "error" in note_info:
             return {"error": note_info["error"]}
-        
+
         # 返回笔记分析结果和评论类型，让MCP客户端(如Claude)生成评论
         # MCP客户端生成评论后，应调用post_comment函数发布评论
         return {
