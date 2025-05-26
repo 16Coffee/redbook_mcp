@@ -254,13 +254,21 @@ class CommentManager:
             print("🌐 开始访问页面...")
             # 访问帖子链接
             await self.browser.main_page.goto(url, timeout=30000)
-            print("⏳ 等待页面加载...")
-            await asyncio.sleep(2)  # 进一步减少等待时间
+            print("⏳ 智能等待页面加载...")
+            # 优化：使用智能等待替代固定2秒，节省1.5秒
+            try:
+                await self.browser.main_page.wait_for_load_state('networkidle', timeout=5000)
+                print("✅ 页面加载完成（智能等待）")
+            except Exception:
+                # 备用方案：如果智能等待失败，使用最小固定等待
+                await asyncio.sleep(0.5)
+                print("✅ 页面加载完成（备用等待）")
 
-            # 直接滚动到页面底部激活评论区域（基于诊断结果优化）
+            # 直接滚动到页面底部激活评论区域（优化等待时间）
             print("📜 滚动到评论区域...")
             await self.browser.main_page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-            await asyncio.sleep(1)
+            # 优化：减少滚动后等待时间，从1秒减少到0.3秒，节省0.7秒
+            await asyncio.sleep(0.3)
 
             # 直接使用诊断验证过的选择器（基于诊断结果优化）
             print("🎯 查找评论输入框...")
@@ -303,9 +311,10 @@ class CommentManager:
             if not comment_input:
                 return "未能找到评论输入框，无法发布评论"
 
-            # 确保元素可见并聚焦
+            # 确保元素可见并聚焦（优化等待时间）
             await comment_input.scroll_into_view_if_needed()
-            await asyncio.sleep(0.3)
+            # 优化：减少聚焦等待时间，从0.3秒减少到0.1秒
+            await asyncio.sleep(0.1)
 
             # 输入评论内容（解决点击被阻挡问题）
             print("📝 激活评论输入框...")
@@ -316,7 +325,8 @@ class CommentManager:
                 if overlay_element:
                     print("🎯 点击覆盖的'评论'元素...")
                     await overlay_element.click()
-                    await asyncio.sleep(0.5)
+                    # 优化：减少点击后等待时间，从0.5秒减少到0.2秒
+                    await asyncio.sleep(0.2)
             except Exception:
                 pass
 
@@ -332,7 +342,8 @@ class CommentManager:
                         }
                     }
                 ''')
-                await asyncio.sleep(0.3)
+                # 优化：减少JavaScript聚焦后等待时间，从0.3秒减少到0.1秒
+                await asyncio.sleep(0.1)
             except Exception:
                 pass
 
@@ -340,7 +351,8 @@ class CommentManager:
             try:
                 print("🎯 尝试force点击...")
                 await comment_input.click(force=True)
-                await asyncio.sleep(0.3)
+                # 优化：减少force点击后等待时间，从0.3秒减少到0.1秒
+                await asyncio.sleep(0.1)
             except Exception:
                 pass
 
@@ -348,13 +360,15 @@ class CommentManager:
             print("📝 输入评论内容...")
             await self.browser.main_page.keyboard.press("Control+a")  # 全选
             await self.browser.main_page.keyboard.type(comment)
-            await asyncio.sleep(0.3)
+            # 优化：减少输入完成后等待时间，从0.3秒减少到0.1秒
+            await asyncio.sleep(0.1)
             print("✅ 评论输入完成")
 
             # 发送评论 - 使用最简单最快的方法
             print("🚀 发送评论...")
             await self.browser.main_page.keyboard.press("Enter")
-            await asyncio.sleep(1)
+            # 优化：减少发送后等待时间，从1秒减少到0.5秒
+            await asyncio.sleep(0.5)
 
             print("✅ 评论发送完成")
             return f"已成功发布评论：{comment}"
