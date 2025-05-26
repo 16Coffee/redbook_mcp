@@ -1,6 +1,6 @@
 {
   "name": "xiaohongshu-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "小红书 MCP 服务器 - 支持评论发布、内容获取等功能",
   "main": "dist/index.js",
   "bin": {
@@ -28,25 +28,22 @@
     "url": "https://github.com/yourusername/xiaohongshu-mcp-server.git"
   },
   "engines": {
-    "node": ">=16.0.0",
-    "python": ">=3.8.0"
+    "node": ">=16.0.0"
   },
   "files": [
     "src/",
     "requirements.txt",
     "README.md",
-    "dist/"
+    "dist/",
+    "scripts/",
+    "install.sh"
   ],
   "mcp": {
     "server": {
-      "command": "python",
-      "args": ["-m", "src.interfaces.mcp.server"],
-      "env": {}
+      "command": "xiaohongshu-mcp",
+      "args": []
     }
   },
   "dependencies": {},
-  "devDependencies": {},
-  "peerDependencies": {
-    "python": ">=3.8.0"
-  }
+  "devDependencies": {}
 }
