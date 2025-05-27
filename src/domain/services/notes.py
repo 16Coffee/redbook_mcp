@@ -356,7 +356,7 @@ class NoteManager:
                         comment_section = await self.browser.main_page.query_selector(locator['value'])
 
                     if comment_section:
-                        # 使用JavaScript滚动到元素
+                        # 使用JavaScript滚动到元素（仅滚动，不点击）
                         await self.browser.main_page.evaluate('''
                             (element) => {
                                 element.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -365,12 +365,13 @@ class NoteManager:
 
                         await asyncio.sleep(2)
 
-                        # 尝试点击评论区
-                        try:
-                            await comment_section.click()
-                            await asyncio.sleep(2)
-                        except Exception:
-                            pass
+                        # 移除点击操作 - 仅获取评论不需要激活评论输入框
+                        # 注释掉原来的点击代码，避免意外触发评论输入框
+                        # try:
+                        #     await comment_section.click()
+                        #     await asyncio.sleep(2)
+                        # except Exception:
+                        #     pass
 
                         break
                 except Exception:
