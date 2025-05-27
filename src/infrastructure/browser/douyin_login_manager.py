@@ -135,6 +135,13 @@ class DouyinLoginManager:
                     if is_closed:
                         logger.warning("抖音页面已关闭，重新启动浏览器")
                         await self.browser.ensure_browser(force_check=True)
+                else:
+                    # 如果没有 is_closed 方法，尝试访问页面URL来检查
+                    try:
+                        await self.browser.main_page.url
+                    except Exception:
+                        logger.warning("抖音页面无法访问，重新启动浏览器")
+                        await self.browser.ensure_browser(force_check=True)
             except Exception as e:
                 logger.warning(f"检查抖音页面状态失败: {str(e)}，重新启动浏览器")
                 await self.browser.ensure_browser(force_check=True)

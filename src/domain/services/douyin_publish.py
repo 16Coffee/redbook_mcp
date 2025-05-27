@@ -272,23 +272,65 @@ class DouyinPublishManager:
     async def _upload_video_file(self, video_path: str):
         """上传视频文件"""
         try:
-            # 查找文件上传输入框
+            # 查找文件上传输入框（包括隐藏的input元素）
             file_input_selectors = [
                 'input[type="file"]',
                 'input[accept*="video"]',
-                '[data-e2e="upload-input"]'
+                'input[accept*=".mp4"]',
+                'input[accept*=".mov"]',
+                '[data-e2e="upload-input"]',
+                '.upload-input',
+                'input[multiple]'
             ]
 
             file_input = None
             for selector in file_input_selectors:
                 try:
-                    file_input = await self.browser.main_page.wait_for_selector(selector, timeout=5000)
+                    # 查找所有匹配的input元素，包括隐藏的
+                    inputs = await self.browser.main_page.query_selector_all(selector)
+                    for input_elem in inputs:
+                        # 检查元素是否可用于文件上传
+                        try:
+                            input_type = await input_elem.get_attribute('type')
+                            if input_type == 'file':
+                                file_input = input_elem
+                                logger.info(f"找到文件上传输入框: {selector}")
+                                break
+                        except Exception:
+                            continue
                     if file_input:
                         break
                 except Exception:
                     continue
 
             if not file_input:
+                # 尝试点击上传区域来触发文件选择
+                upload_area_selectors = [
+                    'text="点击上传或直接拖拽视频文件至此区域"',
+                    'text="上传视频"',
+                    '.upload-area',
+                    '.upload-zone',
+                    '[data-e2e="upload-area"]'
+                ]
+
+                for selector in upload_area_selectors:
+                    try:
+                        upload_area = await self.browser.main_page.wait_for_selector(selector, timeout=3000)
+                        if upload_area:
+                            await upload_area.click()
+                            await asyncio.sleep(1)
+
+                            # 再次查找文件输入框
+                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
+                            if file_input:
+                                logger.info(f"通过点击上传区域找到文件输入框: {selector}")
+                                break
+                    except Exception:
+                        continue
+
+            if not file_input:
+                # 最后尝试：调试页面元素
+                await self._debug_page_elements()
                 raise Exception("未找到文件上传输入框")
 
             # 上传文件
@@ -305,23 +347,66 @@ class DouyinPublishManager:
     async def _upload_image_files(self, image_paths: List[str]):
         """上传图片文件"""
         try:
-            # 查找文件上传输入框
+            # 查找文件上传输入框（包括隐藏的input元素）
             file_input_selectors = [
                 'input[type="file"]',
                 'input[accept*="image"]',
-                '[data-e2e="upload-input"]'
+                'input[accept*=".jpg"]',
+                'input[accept*=".png"]',
+                '[data-e2e="upload-input"]',
+                '.upload-input',
+                'input[multiple]'
             ]
 
             file_input = None
             for selector in file_input_selectors:
                 try:
-                    file_input = await self.browser.main_page.wait_for_selector(selector, timeout=5000)
+                    # 查找所有匹配的input元素，包括隐藏的
+                    inputs = await self.browser.main_page.query_selector_all(selector)
+                    for input_elem in inputs:
+                        # 检查元素是否可用于文件上传
+                        try:
+                            input_type = await input_elem.get_attribute('type')
+                            if input_type == 'file':
+                                file_input = input_elem
+                                logger.info(f"找到文件上传输入框: {selector}")
+                                break
+                        except Exception:
+                            continue
                     if file_input:
                         break
                 except Exception:
                     continue
 
             if not file_input:
+                # 尝试点击上传区域来触发文件选择
+                upload_area_selectors = [
+                    'text="点击上传或直接拖拽图片文件至此区域"',
+                    'text="上传图片"',
+                    'text="选择图片"',
+                    '.upload-area',
+                    '.upload-zone',
+                    '[data-e2e="upload-area"]'
+                ]
+
+                for selector in upload_area_selectors:
+                    try:
+                        upload_area = await self.browser.main_page.wait_for_selector(selector, timeout=3000)
+                        if upload_area:
+                            await upload_area.click()
+                            await asyncio.sleep(1)
+
+                            # 再次查找文件输入框
+                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
+                            if file_input:
+                                logger.info(f"通过点击上传区域找到文件输入框: {selector}")
+                                break
+                    except Exception:
+                        continue
+
+            if not file_input:
+                # 最后尝试：调试页面元素
+                await self._debug_page_elements()
                 raise Exception("未找到文件上传输入框")
 
             # 上传所有图片文件
@@ -680,3 +765,59 @@ class DouyinPublishManager:
         except Exception as e:
             logger.error(f"提交图文发布失败: {str(e)}")
             raise
+
+    async def _debug_page_elements(self):
+        """调试页面元素，帮助找到正确的选择器"""
+        try:
+            logger.info("开始调试页面元素...")
+
+            # 获取页面URL
+            current_url = self.browser.main_page.url
+            logger.info(f"当前页面URL: {current_url}")
+
+            # 查找所有input元素
+            all_inputs = await self.browser.main_page.query_selector_all('input')
+            logger.info(f"页面中共找到 {len(all_inputs)} 个input元素")
+
+            for i, input_elem in enumerate(all_inputs):
+                try:
+                    input_type = await input_elem.get_attribute('type')
+                    input_accept = await input_elem.get_attribute('accept')
+                    input_class = await input_elem.get_attribute('class')
+                    input_id = await input_elem.get_attribute('id')
+                    input_name = await input_elem.get_attribute('name')
+
+                    logger.info(f"Input {i+1}: type={input_type}, accept={input_accept}, class={input_class}, id={input_id}, name={input_name}")
+                except Exception as e:
+                    logger.warning(f"无法获取input {i+1}的属性: {str(e)}")
+
+            # 查找包含"上传"文字的元素
+            upload_texts = ['上传', '选择', '拖拽', 'upload', 'select', 'drag']
+            for text in upload_texts:
+                try:
+                    elements = await self.browser.main_page.query_selector_all(f'text="{text}"')
+                    if elements:
+                        logger.info(f"找到包含'{text}'的元素: {len(elements)}个")
+                except Exception:
+                    continue
+
+            # 查找可能的上传区域
+            upload_selectors = [
+                '.upload',
+                '.file-upload',
+                '.drop-zone',
+                '.upload-area',
+                '[data-testid*="upload"]',
+                '[class*="upload"]'
+            ]
+
+            for selector in upload_selectors:
+                try:
+                    elements = await self.browser.main_page.query_selector_all(selector)
+                    if elements:
+                        logger.info(f"找到选择器'{selector}'的元素: {len(elements)}个")
+                except Exception:
+                    continue
+
+        except Exception as e:
+            logger.error(f"调试页面元素失败: {str(e)}")
