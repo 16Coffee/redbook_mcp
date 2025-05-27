@@ -19,7 +19,7 @@ class DouyinBrowserManager:
         self.context = None
         self.main_page = None
         self.is_logged_in = False
-        self.data_dir = Path(config.browser["data_dir"]) / "douyin_data"
+        self.data_dir = config.paths.browser_data_dir / "douyin_data"
 
         # 引入登录状态管理器（延迟初始化）
         self._login_manager = None
