@@ -4,6 +4,7 @@
 """
 import asyncio
 import time
+import os # <--- 添加或确保这行存在
 from playwright.async_api import async_playwright
 from src.core.config.config import (
     BROWSER_DATA_DIR, DEFAULT_TIMEOUT, DEFAULT_WAIT_TIME, 
@@ -284,6 +285,8 @@ class BrowserManager:
             try:
                 restart_count += 1
                 logger.info(f"[BrowserManager] 开始启动浏览器 (第{restart_count}次)")
+                logger.info(f"[BrowserManager] 当前工作目录 (CWD): {os.getcwd()}") # <--- 新增行
+                logger.info(f"[BrowserManager] 使用的 BROWSER_DATA_DIR: {BROWSER_DATA_DIR}") # <--- 新增行
                 
                 # 启动浏览器
                 self.playwright_instance = await async_playwright().start()
@@ -324,37 +327,26 @@ class BrowserManager:
                 )
                 
                 # 使用持久化上下文来保存用户状态
+                logger.info("!!! 测试恢复 ignore_default_args 参数 !!!") # 恢复到这个状态的日志
                 self.browser_context = await self.playwright_instance.chromium.launch_persistent_context(
                     user_data_dir=BROWSER_DATA_DIR,
-                    headless=False,  # 非隐藏模式，方便用户登录
+                    headless=False,
                     viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
                     timeout=DEFAULT_TIMEOUT,
-                    args=browser_args,  # 添加强化的反检测参数
-                    user_agent=realistic_user_agent,  # 设置真实User Agent
-                    # 额外的反检测配置
-                    locale='zh-CN',  # 设置中文本地化
-                    timezone_id='Asia/Shanghai',  # 设置中国时区
-                    permissions=['geolocation', 'notifications'],  # 授予常见权限
-                    # 屏幕和设备信息
-                    screen={'width': 1920, 'height': 1080},
-                    device_scale_factor=1,
-                    # 禁用自动化标志
-                    ignore_default_args=[
+                    # args=browser_args,
+                    # user_agent=realistic_user_agent,
+                    # locale='zh-CN',
+                    # timezone_id='Asia/Shanghai',
+                    # permissions=['geolocation', 'notifications'],
+                    # screen={'width': 1920, 'height': 1080},
+                    # device_scale_factor=1,
+                    ignore_default_args=[  # <--- 启用这部分的注释
                         '--enable-automation',
-                        '--no-sandbox',         # 关键：忽略no-sandbox参数，避免安全警告
+                        '--no-sandbox',
                     ],
-                    # 额外参数
-                    extra_http_headers={
-                        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache',
-                        'Sec-Fetch-Site': 'none',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-User': '?1',
-                        'Upgrade-Insecure-Requests': '1',
-                    }
+                    # extra_http_headers={
+                    #     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    # }
                 )
                 
                 # 创建一个新页面

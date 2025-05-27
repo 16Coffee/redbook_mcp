@@ -1,6 +1,6 @@
 {
   "name": "xiaohongshu-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "小红书 MCP 服务器 - 支持评论发布、内容获取等功能",
   "main": "dist/index.js",
   "bin": {
@@ -30,14 +30,6 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "files": [
-    "src/",
-    "requirements.txt",
-    "README.md",
-    "dist/",
-    "scripts/",
-    "install.sh"
-  ],
   "mcp": {
     "server": {
       "command": "xiaohongshu-mcp",

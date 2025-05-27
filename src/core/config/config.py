@@ -39,7 +39,7 @@ class Config:
     def _load_config(self):
         """加载配置"""
         # 基础路径配置 - 将browser_data移到项目根目录以提高持久化稳定性
-        base_dir = Path(__file__).parent.parent.parent  # 指向项目根目录
+        base_dir = Path(__file__).resolve().parent.parent.parent.parent  # 指向项目根目录
         self.paths = PathConfig(
             base_dir=base_dir,
             browser_data_dir=base_dir / "browser_data",  # 移到项目根目录
