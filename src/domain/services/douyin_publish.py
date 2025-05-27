@@ -132,17 +132,107 @@ class DouyinPublishManager:
     async def _navigate_to_creator_center(self):
         """导航到创作者中心"""
         try:
-            # 访问创作者中心
-            creator_url = "https://creator.douyin.com/creator-micro/content/upload"
-            await self.browser.goto(creator_url)
-
-            # 等待页面加载
+            # 首先访问创作者中心主页
+            creator_main_url = "https://creator.douyin.com"
+            await self.browser.goto(creator_main_url)
             await asyncio.sleep(3)
 
-            logger.info("已进入抖音创作者中心")
+            current_url = self.browser.main_page.url
+            logger.info(f"访问创作者中心，当前URL: {current_url}")
+
+            # 检查是否需要登录
+            if "login" in current_url.lower() or await self._check_need_login():
+                logger.info("检测到需要登录，开始登录流程...")
+
+                # 使用登录管理器进行登录
+                from src.infrastructure.browser.douyin_login_manager import DouyinLoginManager
+                login_manager = DouyinLoginManager(self.browser)
+
+                login_success = await login_manager.login()
+                if not login_success:
+                    raise Exception("登录失败，无法继续发布")
+
+                # 登录成功后重新访问创作者中心
+                await self.browser.goto(creator_main_url)
+                await asyncio.sleep(3)
+
+            # 尝试导航到上传页面
+            upload_url = "https://creator.douyin.com/creator-micro/content/upload"
+            await self.browser.goto(upload_url)
+            await asyncio.sleep(3)
+
+            # 验证是否成功进入上传页面
+            final_url = self.browser.main_page.url
+            logger.info(f"最终页面URL: {final_url}")
+
+            # 检查页面是否包含上传相关元素
+            await self._verify_upload_page()
+
+            logger.info("已成功进入抖音创作者中心上传页面")
 
         except Exception as e:
             logger.error(f"导航到创作者中心失败: {str(e)}")
+            raise
+
+    async def _check_need_login(self) -> bool:
+        """检查是否需要登录"""
+        try:
+            # 查找登录相关元素
+            login_indicators = [
+                'text="登录"',
+                'text="我是创作者"',
+                'text="扫码登录"',
+                '.login-btn',
+                '.qr-code'
+            ]
+
+            for selector in login_indicators:
+                try:
+                    element = await self.browser.main_page.query_selector(selector)
+                    if element:
+                        logger.info(f"检测到登录元素: {selector}")
+                        return True
+                except Exception:
+                    continue
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"检查登录状态失败: {str(e)}")
+            return True  # 出错时假设需要登录
+
+    async def _verify_upload_page(self):
+        """验证是否在上传页面"""
+        try:
+            # 查找上传页面的特征元素
+            upload_indicators = [
+                'text="上传视频"',
+                'text="发布视频"',
+                'text="选择文件"',
+                'input[type="file"]',
+                '.upload-area',
+                '.upload-zone'
+            ]
+
+            found_indicators = 0
+            for selector in upload_indicators:
+                try:
+                    elements = await self.browser.main_page.query_selector_all(selector)
+                    if elements:
+                        found_indicators += 1
+                        logger.debug(f"找到上传页面元素: {selector}")
+                except Exception:
+                    continue
+
+            if found_indicators == 0:
+                # 如果没有找到任何上传元素，调试页面
+                await self._debug_page_elements()
+                raise Exception("未检测到上传页面元素，可能未正确导航到上传页面")
+
+            logger.info(f"验证上传页面成功，找到 {found_indicators} 个相关元素")
+
+        except Exception as e:
+            logger.error(f"验证上传页面失败: {str(e)}")
             raise
 
     async def _publish_video(

@@ -131,14 +131,28 @@ class DouyinLoginManager:
             # 检查页面是否已关闭
             try:
                 if hasattr(self.browser.main_page, 'is_closed'):
-                    is_closed = await self.browser.main_page.is_closed()
+                    # 修复：is_closed()可能是同步方法
+                    try:
+                        is_closed = self.browser.main_page.is_closed()
+                        # 如果返回的是协程，则await它
+                        if hasattr(is_closed, '__await__'):
+                            is_closed = await is_closed
+                    except Exception:
+                        # 如果调用失败，尝试异步调用
+                        try:
+                            is_closed = await self.browser.main_page.is_closed()
+                        except Exception:
+                            # 如果都失败，假设页面未关闭
+                            is_closed = False
+
                     if is_closed:
                         logger.warning("抖音页面已关闭，重新启动浏览器")
                         await self.browser.ensure_browser(force_check=True)
                 else:
                     # 如果没有 is_closed 方法，尝试访问页面URL来检查
                     try:
-                        await self.browser.main_page.url
+                        current_url = self.browser.main_page.url
+                        logger.debug(f"页面URL检查成功: {current_url}")
                     except Exception:
                         logger.warning("抖音页面无法访问，重新启动浏览器")
                         await self.browser.ensure_browser(force_check=True)
@@ -257,6 +271,85 @@ class DouyinLoginManager:
 
         except Exception as e:
             logger.debug(f"更新抖音活动时间失败: {str(e)}")
+
+    async def login(self) -> bool:
+        """手动登录流程
+
+        Returns:
+            登录是否成功
+        """
+        try:
+            logger.info("开始抖音手动登录流程...")
+
+            # 确保浏览器启动
+            await self.browser.ensure_browser()
+
+            # 导航到创作者中心登录页面
+            await self.browser.goto("https://creator.douyin.com")
+            await asyncio.sleep(3)
+
+            # 检查是否已经登录
+            current_url = self.browser.main_page.url
+            logger.info(f"当前页面URL: {current_url}")
+
+            # 如果URL包含登录相关路径，说明需要登录
+            if "login" in current_url.lower() or "creator.douyin.com" in current_url:
+                logger.info("检测到登录页面，等待用户手动登录...")
+
+                # 等待用户手动登录（检查URL变化或登录元素消失）
+                max_wait_time = 300  # 5分钟超时
+                start_time = time.time()
+
+                while time.time() - start_time < max_wait_time:
+                    await asyncio.sleep(2)
+
+                    try:
+                        current_url = self.browser.main_page.url
+
+                        # 检查是否跳转到了主页面或其他非登录页面
+                        if "login" not in current_url.lower():
+                            logger.info("检测到页面跳转，可能已登录")
+                            break
+
+                        # 检查登录按钮是否消失
+                        login_elements = await self.browser.main_page.query_selector_all('text="登录"')
+                        if len(login_elements) == 0:
+                            logger.info("登录按钮消失，可能已登录")
+                            break
+
+                    except Exception as e:
+                        logger.debug(f"检查登录状态时出错: {str(e)}")
+                        continue
+
+                # 验证登录状态
+                if await self.check_login_status(force_check=True):
+                    logger.info("✅ 手动登录成功")
+                    self._session_start_time = datetime.now()
+                    self._login_attempts += 1
+
+                    # 保存登录状态
+                    await self.save_login_state({
+                        "login_method": "manual_login",
+                        "login_time": datetime.now().isoformat(),
+                        "platform": "douyin"
+                    })
+
+                    return True
+                else:
+                    logger.warning("❌ 手动登录失败或超时")
+                    return False
+            else:
+                # 可能已经登录了
+                if await self.check_login_status(force_check=True):
+                    logger.info("✅ 检测到已登录状态")
+                    return True
+                else:
+                    logger.warning("❌ 未检测到登录状态")
+                    return False
+
+        except Exception as e:
+            logger.error(f"手动登录过程中出错: {str(e)}")
+            return False
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取当前会话信息"""
