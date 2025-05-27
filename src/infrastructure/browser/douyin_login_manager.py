@@ -213,13 +213,17 @@ class DouyinLoginManager:
                 logger.info("没有可恢复的抖音登录状态")
                 return False
 
-            # 启动浏览器（会自动加载保存的cookies和session）
+            # 启动浏览器
             await self.browser.ensure_browser()
+
+            # 关键修复：加载保存的cookies
+            await self._restore_cookies()
 
             # 检查登录状态
             if await self.check_login_status(force_check=True):
                 logger.info("自动恢复抖音登录状态成功")
                 self._session_start_time = datetime.now()
+                self.browser.is_logged_in = True
                 return True
             else:
                 logger.warning("自动恢复抖音登录状态失败，可能需要重新登录")
@@ -228,6 +232,27 @@ class DouyinLoginManager:
         except Exception as e:
             logger.error(f"自动恢复抖音登录状态时出错: {str(e)}")
             return False
+
+    async def _restore_cookies(self):
+        """恢复保存的cookies"""
+        try:
+            # 查找最新的cookies备份文件
+            backup_files = sorted(self.cookie_backup_dir.glob("douyin_cookies_*.json"))
+            if backup_files:
+                latest_backup = backup_files[-1]
+                logger.info(f"尝试恢复cookies: {latest_backup}")
+
+                # 加载cookies
+                success = await self.browser.load_cookies(str(latest_backup))
+                if success:
+                    logger.info("✅ 抖音cookies恢复成功")
+                else:
+                    logger.warning("⚠️ 抖音cookies恢复失败")
+            else:
+                logger.info("未找到可恢复的抖音cookies备份")
+
+        except Exception as e:
+            logger.error(f"恢复抖音cookies失败: {str(e)}")
 
     async def _backup_cookies(self):
         """备份当前的cookies"""
