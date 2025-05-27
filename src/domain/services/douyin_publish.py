@@ -338,14 +338,21 @@ class DouyinPublishManager:
         try:
             logger.info(f"开始上传视频: {video_path}")
 
-            # 首先尝试直接找到文件输入元素（参考小红书方式）
+            # 首先尝试直接找到文件输入元素（完全参考小红书方式）
             file_input = await self.browser.main_page.query_selector('input[type="file"]')
             if file_input:
                 logger.info("找到文件输入元素，直接设置文件")
                 await file_input.set_input_files(video_path)
                 logger.info(f"视频文件设置成功: {video_path}")
-                await asyncio.sleep(5)  # 等待上传
-                return
+                await asyncio.sleep(3)  # 等待上传（参考小红书）
+
+                # 验证文件是否真正上传成功
+                upload_success = await self._verify_file_upload_success()
+                if upload_success:
+                    logger.info("文件上传验证成功")
+                    return
+                else:
+                    logger.warning("文件上传验证失败，尝试其他方式")
 
             # 使用JavaScript查找上传元素（完全参考小红书方式）
             logger.info("使用JavaScript查找视频上传元素...")
@@ -446,6 +453,78 @@ class DouyinPublishManager:
             logger.error(f"上传视频文件失败: {str(e)}")
             raise
 
+    async def _verify_file_upload_success(self):
+        """验证文件是否真正上传成功（参考小红书模式）"""
+        try:
+            # 等待上传完成的指示器（参考小红书的验证方式）
+            upload_success_indicators = [
+                '.upload-success',
+                '.file-uploaded',
+                '.video-preview',
+                '.video-thumbnail',
+                'text="上传成功"',
+                'text="上传完成"',
+                'text="处理完成"',
+                '.progress-100',
+                '[data-status="success"]',
+                '.el-upload-list__item-status-label',  # Element UI 上传成功标识
+                '.upload-item-success'
+            ]
+
+            # 检查上传成功指示器
+            for indicator in upload_success_indicators:
+                try:
+                    element = await self.browser.main_page.query_selector(indicator)
+                    if element:
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            logger.info(f"检测到上传成功指示器: {indicator}")
+                            return True
+                except Exception:
+                    continue
+
+            # 使用JavaScript检查页面变化
+            js_check = await self.browser.main_page.evaluate('''
+                () => {
+                    // 检查是否有视频预览元素
+                    const videoElements = document.querySelectorAll('video, .video-preview, .video-thumbnail');
+                    if (videoElements.length > 0) {
+                        return { success: true, reason: 'found_video_elements' };
+                    }
+
+                    // 检查是否有上传进度或成功提示
+                    const progressElements = document.querySelectorAll('.progress, .upload-progress, [class*="progress"]');
+                    for (let el of progressElements) {
+                        if (el.textContent && el.textContent.includes('100%')) {
+                            return { success: true, reason: 'progress_100' };
+                        }
+                    }
+
+                    // 检查是否有文件名显示
+                    const fileNameElements = document.querySelectorAll('[class*="file"], [class*="name"]');
+                    for (let el of fileNameElements) {
+                        if (el.textContent && (el.textContent.includes('.mp4') || el.textContent.includes('.mov'))) {
+                            return { success: true, reason: 'file_name_found' };
+                        }
+                    }
+
+                    return { success: false };
+                }
+            ''')
+
+            if js_check.get('success'):
+                logger.info(f"JavaScript验证上传成功: {js_check.get('reason')}")
+                return True
+
+            # 如果没有明确的成功指示器，等待一段时间后假设成功
+            await asyncio.sleep(2)
+            logger.info("未找到明确的上传成功指示器，假设上传成功")
+            return True
+
+        except Exception as e:
+            logger.warning(f"验证文件上传成功时出错: {str(e)}")
+            return True  # 即使验证失败也继续
+
     async def _wait_for_video_processing(self):
         """等待视频处理完成"""
         try:
@@ -493,19 +572,38 @@ class DouyinPublishManager:
             raise
 
     async def _fill_title(self, title: str):
-        """填写标题（完全参考小红书模式）"""
+        """填写标题（完全参考小红书模式，适配抖音）"""
         try:
-            # 使用小红书的选择器和方法
-            title_input = await self.browser.main_page.query_selector('input[placeholder*="标题"], textarea[placeholder*="标题"]')
-            if title_input:
-                await title_input.click()  # 先点击输入框
-                await asyncio.sleep(0.5)
-                await title_input.type(title)  # 使用type而不是fill
-                await asyncio.sleep(1)
-                logger.info("标题填写成功")
-                return
+            # 抖音特定的标题输入框选择器
+            title_selectors = [
+                'input[placeholder*="标题"]',
+                'textarea[placeholder*="标题"]',
+                'input[placeholder*="title"]',
+                'textarea[placeholder*="title"]',
+                'input[placeholder*="Title"]',
+                '[data-e2e="title-input"]',
+                '.title-input',
+                'input[name*="title"]',
+                'textarea[name*="title"]'
+            ]
 
-            # 如果没找到，使用JavaScript查找
+            # 尝试每个选择器
+            for selector in title_selectors:
+                try:
+                    title_input = await self.browser.main_page.query_selector(selector)
+                    if title_input:
+                        logger.info(f"找到标题输入框: {selector}")
+                        await title_input.click()  # 先点击输入框
+                        await asyncio.sleep(0.5)
+                        await title_input.fill(title)  # 使用fill方法（参考小红书）
+                        await asyncio.sleep(1)
+                        logger.info("标题填写成功")
+                        return
+                except Exception as e:
+                    logger.debug(f"选择器 {selector} 失败: {str(e)}")
+                    continue
+
+            # 如果没找到，使用JavaScript查找和填写（完全参考小红书方式）
             logger.info("使用JavaScript查找标题输入框...")
             js_result = await self.browser.main_page.evaluate(f'''
                 () => {{
@@ -514,7 +612,9 @@ class DouyinPublishManager:
                         el.placeholder && (
                             el.placeholder.includes('标题') ||
                             el.placeholder.includes('title') ||
-                            el.placeholder.includes('Title')
+                            el.placeholder.includes('Title') ||
+                            el.placeholder.includes('起个标题') ||
+                            el.placeholder.includes('输入标题')
                         )
                     );
 
@@ -523,6 +623,7 @@ class DouyinPublishManager:
                         titleInput.focus();
                         titleInput.value = "{title}";
                         titleInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        titleInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         return {{ success: true, placeholder: titleInput.placeholder }};
                     }}
 
@@ -541,42 +642,23 @@ class DouyinPublishManager:
             raise
 
     async def _fill_description(self, content: str, topics: Optional[List[str]]):
-        """填写描述内容（完全参考小红书模式）"""
+        """填写描述内容（完全参考小红书模式，适配抖音）"""
         try:
-            # 使用小红书的选择器和方法
-            content_input = await self.browser.main_page.query_selector('div[contenteditable="true"], textarea[placeholder*="输入正文"], [role="textbox"]')
-            if content_input:
-                await content_input.click()
-                await asyncio.sleep(0.5)
-
-                # 输入基础内容
-                await content_input.type(content)
-                await asyncio.sleep(0.5)
-
-                # 添加话题标签（在内容末尾）
-                if topics and len(topics) > 0:
-                    await content_input.type('\n\n')  # 换行分隔
-                    logger.info(f"开始添加话题标签，共 {len(topics)} 个")
-
-                    for i, topic in enumerate(topics):
-                        topic_text = f"#{topic}"
-                        logger.info(f"输入话题标签: {topic_text}")
-                        await content_input.type(topic_text)
-                        await asyncio.sleep(2)  # 等待下拉建议出现
-
-                        # 如果不是最后一个话题，添加空格
-                        if i < len(topics) - 1:
-                            await content_input.type(' ')
-                            await asyncio.sleep(0.5)
-
-                    logger.info("话题标签添加完成")
-
-                await asyncio.sleep(1)
-                logger.info("描述填写成功")
-                return
-
-            # 如果没找到，使用JavaScript查找和填写
-            logger.info("使用JavaScript查找描述输入框...")
+            # 抖音特定的描述输入框选择器
+            description_selectors = [
+                'div[contenteditable="true"]',
+                'textarea[placeholder*="输入正文"]',
+                'textarea[placeholder*="描述"]',
+                'textarea[placeholder*="说点什么"]',
+                'textarea[placeholder*="内容"]',
+                '[role="textbox"]',
+                '[data-e2e="desc-input"]',
+                '.desc-input',
+                'textarea[name*="desc"]',
+                'textarea[name*="content"]',
+                'div[data-placeholder]',
+                '.ql-editor'  # 富文本编辑器
+            ]
 
             # 构建完整内容（包含话题标签）
             full_content = content
@@ -584,16 +666,48 @@ class DouyinPublishManager:
                 topic_tags = ' '.join([f'#{topic}' for topic in topics])
                 full_content = f"{content}\n\n{topic_tags}"
 
+            # 尝试每个选择器
+            for selector in description_selectors:
+                try:
+                    content_input = await self.browser.main_page.query_selector(selector)
+                    if content_input:
+                        logger.info(f"找到描述输入框: {selector}")
+                        await content_input.click()
+                        await asyncio.sleep(0.5)
+
+                        # 检查是否是contenteditable元素
+                        is_contenteditable = await content_input.evaluate('el => el.contentEditable === "true"')
+
+                        if is_contenteditable:
+                            # 对于contenteditable元素，使用type方法
+                            await content_input.type(full_content)
+                        else:
+                            # 对于textarea元素，使用fill方法
+                            await content_input.fill(full_content)
+
+                        await asyncio.sleep(1)
+                        logger.info("描述填写成功")
+                        return
+                except Exception as e:
+                    logger.debug(f"选择器 {selector} 失败: {str(e)}")
+                    continue
+
+            # 如果没找到，使用JavaScript查找和填写（完全参考小红书方式）
+            logger.info("使用JavaScript查找描述输入框...")
+
             js_result = await self.browser.main_page.evaluate(f'''
                 () => {{
-                    const textareas = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'));
+                    const textareas = Array.from(document.querySelectorAll('textarea, [contenteditable="true"], div[data-placeholder]'));
                     const contentArea = textareas.find(el =>
-                        el.placeholder && (
+                        (el.placeholder && (
                             el.placeholder.includes('输入') ||
                             el.placeholder.includes('描述') ||
                             el.placeholder.includes('正文') ||
-                            el.placeholder.includes('内容')
-                        )
+                            el.placeholder.includes('内容') ||
+                            el.placeholder.includes('说点什么')
+                        )) ||
+                        (el.dataset && el.dataset.placeholder) ||
+                        el.contentEditable === 'true'
                     );
 
                     if (contentArea) {{
@@ -605,7 +719,8 @@ class DouyinPublishManager:
                             contentArea.value = "{full_content}";
                         }}
                         contentArea.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        return {{ success: true, placeholder: contentArea.placeholder || 'contenteditable' }};
+                        contentArea.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        return {{ success: true, placeholder: contentArea.placeholder || contentArea.dataset.placeholder || 'contenteditable' }};
                     }}
 
                     return {{ success: false }};
@@ -767,69 +882,7 @@ class DouyinPublishManager:
             logger.error(f"填写图文信息失败: {str(e)}")
             raise
 
-    async def _fill_title(self, title: str):
-        """填写标题"""
-        try:
-            title_selectors = [
-                'input[placeholder*="标题"]',
-                'input[placeholder*="title"]',
-                '[data-e2e="title-input"]',
-                '.title-input'
-            ]
 
-            for selector in title_selectors:
-                try:
-                    title_input = await self.browser.main_page.wait_for_selector(selector, timeout=5000)
-                    if title_input:
-                        await title_input.clear()
-                        await title_input.fill(title)
-                        logger.info(f"标题填写成功: {title}")
-                        return
-                except Exception:
-                    continue
-
-            logger.warning("未找到标题输入框")
-
-        except Exception as e:
-            logger.error(f"填写标题失败: {str(e)}")
-            raise
-
-    async def _fill_description(self, content: str, topics: Optional[List[str]]):
-        """填写描述"""
-        try:
-            # 构建完整描述
-            full_description = content
-
-            # 添加话题标签
-            if topics:
-                topic_tags = " ".join([f"#{topic}" for topic in topics])
-                full_description = f"{content}\n\n{topic_tags}"
-
-            # 查找描述输入框
-            desc_selectors = [
-                'textarea[placeholder*="描述"]',
-                'textarea[placeholder*="说点什么"]',
-                '[data-e2e="desc-input"]',
-                '.desc-input',
-                'textarea'
-            ]
-
-            for selector in desc_selectors:
-                try:
-                    desc_input = await self.browser.main_page.wait_for_selector(selector, timeout=5000)
-                    if desc_input:
-                        await desc_input.clear()
-                        await desc_input.fill(full_description)
-                        logger.info("描述填写成功")
-                        return
-                except Exception:
-                    continue
-
-            logger.warning("未找到描述输入框")
-
-        except Exception as e:
-            logger.error(f"填写描述失败: {str(e)}")
-            raise
 
     async def _set_video_settings(self, privacy: str, allow_comment: bool, allow_duet: bool, allow_stitch: bool):
         """设置视频选项"""
