@@ -8,6 +8,7 @@ from src.infrastructure.browser.douyin_browser import DouyinBrowserManager
 from src.domain.services.notes import NoteManager
 from src.domain.services.comments import CommentManager
 from src.domain.services.publish import PublishManager
+from src.domain.services.douyin_publish import DouyinPublishManager
 from src.core.config.config import config
 from src.core.logging.logger import logger
 from src.infrastructure.cache.cache import cache_manager
@@ -30,6 +31,7 @@ douyin_browser_manager = DouyinBrowserManager()
 note_manager = NoteManager(browser_manager)
 comment_manager = CommentManager(browser_manager, note_manager)
 publish_manager = PublishManager(browser_manager)
+douyin_publish_manager = DouyinPublishManager(douyin_browser_manager)
 
 async def cleanup_resources():
     """清理资源"""
@@ -204,7 +206,7 @@ async def post_smart_comment(url: str, comment_type: str = "引流"):
         return error_msg
 
 @mcp.tool()
-async def publish_note(title: str, content: str, media_paths: list, topics: list = None):
+async def publish_note_redbook(title: str, content: str, media_paths: list, topics: list = None):
     """发布小红书图文或视频笔记
 
     Args:
@@ -218,10 +220,57 @@ async def publish_note(title: str, content: str, media_paths: list, topics: list
     """
     try:
         result = await publish_manager.publish_note(title, content, media_paths, topics)
-        logger.info(f"发布笔记完成: {title}")
+        logger.info(f"发布小红书笔记完成: {title}")
         return result
     except Exception as e:
-        error_msg = f"发布笔记失败: {str(e)}"
+        error_msg = f"发布小红书笔记失败: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
+
+@mcp.tool()
+async def publish_douyin_content(
+    title: str,
+    content: str,
+    media_paths: list,
+    content_type: str = "auto",
+    topics: list = None,
+    privacy: str = "public",
+    allow_comment: bool = True,
+    allow_duet: bool = True,
+    allow_stitch: bool = True
+):
+    """发布抖音视频或图文内容
+
+    Args:
+        title: 标题
+        content: 内容描述
+        media_paths: 媒体文件路径列表（视频或图片）
+        content_type: 内容类型 ("video", "image", "auto" - 自动检测)
+        topics: 话题标签列表（可选）
+        privacy: 隐私设置 ("public", "private", "friends")
+        allow_comment: 是否允许评论
+        allow_duet: 是否允许合拍（仅视频）
+        allow_stitch: 是否允许拼接（仅视频）
+
+    Returns:
+        str: 发布结果
+    """
+    try:
+        result = await douyin_publish_manager.publish_content(
+            title=title,
+            content=content,
+            media_paths=media_paths,
+            content_type=content_type,
+            topics=topics,
+            privacy=privacy,
+            allow_comment=allow_comment,
+            allow_duet=allow_duet,
+            allow_stitch=allow_stitch
+        )
+        logger.info(f"发布抖音内容完成: {title}")
+        return result
+    except Exception as e:
+        error_msg = f"发布抖音内容失败: {str(e)}"
         logger.error(error_msg)
         return error_msg
 
