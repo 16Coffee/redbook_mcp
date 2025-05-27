@@ -47,7 +47,8 @@ class DouyinBrowserManager:
             # 检查浏览器是否仍然有效
             try:
                 if hasattr(self.main_page, 'is_closed'):
-                    is_closed = await self.main_page.is_closed()
+                    # 注意：is_closed 是属性，不是方法
+                    is_closed = self.main_page.is_closed()
                     if is_closed:
                         logger.warning("抖音浏览器页面已关闭，重新启动")
                         await self.start_browser()
@@ -78,7 +79,6 @@ class DouyinBrowserManager:
             # 启动浏览器
             self.browser = await self.playwright.chromium.launch(
                 headless=False,  # 显示浏览器窗口
-                user_data_dir=str(self.data_dir),
                 args=[
                     '--no-sandbox',
                     '--disable-blink-features=AutomationControlled',
@@ -87,10 +87,11 @@ class DouyinBrowserManager:
                 ]
             )
 
-            # 创建浏览器上下文
+            # 创建浏览器上下文（使用持久化上下文）
             self.context = await self.browser.new_context(
                 viewport={'width': 1280, 'height': 720},
-                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                storage_state=None  # 可以后续加载保存的状态
             )
 
             # 创建主页面
@@ -210,9 +211,39 @@ class DouyinBrowserManager:
 
             # 查找登录按钮并点击
             try:
-                login_elements = await self.main_page.query_selector_all('text="登录"')
-                if login_elements:
-                    await login_elements[0].click()
+                # 等待页面完全加载
+                await asyncio.sleep(3)
+
+                # 尝试多种登录按钮选择器
+                login_selectors = [
+                    'text="登录"',
+                    '[data-e2e="login-button"]',
+                    '.login-button',
+                    'button:has-text("登录")',
+                    'a:has-text("登录")'
+                ]
+
+                login_element = None
+                for selector in login_selectors:
+                    try:
+                        login_element = await self.main_page.wait_for_selector(selector, timeout=5000)
+                        if login_element:
+                            logger.info(f"找到登录按钮，使用选择器: {selector}")
+                            break
+                    except Exception:
+                        continue
+
+                if login_element:
+                    # 滚动到元素位置
+                    await login_element.scroll_into_view_if_needed()
+                    await asyncio.sleep(1)
+
+                    # 尝试点击，如果被拦截则使用 JavaScript 点击
+                    try:
+                        await login_element.click(timeout=10000)
+                    except Exception as e:
+                        logger.warning(f"普通点击失败，尝试 JavaScript 点击: {str(e)}")
+                        await self.main_page.evaluate('(element) => element.click()', login_element)
 
                     # 提示用户手动登录
                     message = "请在打开的浏览器窗口中完成抖音登录操作。支持扫码登录或手机号登录。登录成功后，系统将自动继续。"
@@ -228,7 +259,8 @@ class DouyinBrowserManager:
                         try:
                             # 检查页面是否仍然有效
                             if hasattr(self.main_page, 'is_closed'):
-                                is_closed = await self.main_page.is_closed()
+                                # 注意：is_closed 是属性，不是方法
+                                is_closed = self.main_page.is_closed()
                                 if is_closed:
                                     logger.error("页面在等待登录过程中被关闭")
                                     return "页面已关闭，请重新尝试登录"
