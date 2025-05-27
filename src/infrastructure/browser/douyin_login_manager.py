@@ -272,84 +272,109 @@ class DouyinLoginManager:
         except Exception as e:
             logger.debug(f"更新抖音活动时间失败: {str(e)}")
 
-    async def login(self) -> bool:
-        """手动登录流程
+    async def login(self) -> str:
+        """智能登录，优先尝试恢复，失败后引导用户登录
 
         Returns:
-            登录是否成功
+            登录结果消息
         """
         try:
-            logger.info("开始抖音手动登录流程...")
+            # 首先尝试自动恢复
+            logger.info("尝试自动恢复抖音登录状态...")
+            if await self.auto_restore_login():
+                return "已自动恢复抖音登录状态"
 
-            # 确保浏览器启动
+            # 自动恢复失败，进行手动登录
+            logger.info("自动恢复失败，开始抖音手动登录流程")
+
+            # 确保浏览器已启动并健康
             await self.browser.ensure_browser()
 
-            # 导航到创作者中心登录页面
-            await self.browser.goto("https://creator.douyin.com")
-            await asyncio.sleep(3)
+            # 验证页面状态
+            if not self.browser.main_page:
+                logger.error("抖音浏览器页面未正确初始化")
+                return "浏览器初始化失败，请重试"
 
-            # 检查是否已经登录
-            current_url = self.browser.main_page.url
-            logger.info(f"当前页面URL: {current_url}")
+            # 安全地访问抖音创作者中心
+            try:
+                current_url = self.browser.main_page.url
+                if not current_url.startswith("https://creator.douyin.com"):
+                    await self.browser.main_page.goto("https://creator.douyin.com", timeout=60000)
+                    await asyncio.sleep(3)
+            except Exception as e:
+                logger.warning(f"访问创作者中心失败: {str(e)}，尝试重新启动浏览器")
+                await self.browser.ensure_browser(force_check=True)
+                await self.browser.main_page.goto("https://creator.douyin.com", timeout=60000)
+                await asyncio.sleep(3)
 
             # 检查是否需要登录
             need_login = await self._check_if_need_login()
             if need_login:
-                logger.info("检测到需要登录，等待用户手动登录...")
-                logger.info("请在浏览器中完成登录操作...")
+                # 提示用户手动登录
+                message = "请在打开的浏览器窗口中完成抖音登录操作。登录成功后，系统将自动继续。"
+                print(message)
+                logger.info("等待用户抖音登录")
 
-                # 等待用户手动登录
-                max_wait_time = 300  # 5分钟超时
-                start_time = time.time()
+                # 等待用户登录成功
+                max_wait_time = 180  # 等待3分钟
+                wait_interval = 5
+                waited_time = 0
 
-                while time.time() - start_time < max_wait_time:
-                    await asyncio.sleep(3)
-
+                while waited_time < max_wait_time:
                     try:
-                        # 检查是否已经登录成功
+                        # 检查页面是否仍然有效
+                        if hasattr(self.browser.main_page, 'is_closed'):
+                            try:
+                                is_closed = self.browser.main_page.is_closed()
+                                if hasattr(is_closed, '__await__'):
+                                    is_closed = await is_closed
+                                if is_closed:
+                                    logger.error("页面在等待登录过程中被关闭")
+                                    return "页面已关闭，请重新尝试登录"
+                            except Exception:
+                                pass
+
+                        # 检查是否已登录成功
                         if not await self._check_if_need_login():
-                            logger.info("检测到登录成功")
-                            break
+                            self.browser.is_logged_in = True
+                            await asyncio.sleep(2)  # 等待页面加载
 
-                        # 检查URL是否发生了有意义的变化
-                        new_url = self.browser.main_page.url
-                        if new_url != current_url and "login" not in new_url.lower():
-                            logger.info(f"检测到页面跳转: {new_url}")
-                            break
+                            # 保存登录状态
+                            await self.save_login_state({
+                                "login_method": "manual_scan",
+                                "login_time": datetime.now().isoformat(),
+                                "platform": "douyin"
+                            })
+                            self._session_start_time = datetime.now()
 
+                            logger.info("用户抖音登录成功")
+                            return "抖音登录成功！"
                     except Exception as e:
-                        logger.debug(f"检查登录状态时出错: {str(e)}")
-                        continue
+                        logger.warning(f"检查抖音登录状态时出错: {str(e)}")
+                        # 如果查询失败，可能是页面问题，尝试恢复
+                        try:
+                            await self.browser.ensure_browser(force_check=True)
+                        except Exception:
+                            pass
 
-                # 验证登录状态
-                if await self.check_login_status(force_check=True):
-                    logger.info("✅ 手动登录成功")
-                    self._session_start_time = datetime.now()
-                    self._login_attempts += 1
+                    # 继续等待
+                    await asyncio.sleep(wait_interval)
+                    waited_time += wait_interval
 
-                    # 保存登录状态
-                    await self.save_login_state({
-                        "login_method": "manual_login",
-                        "login_time": datetime.now().isoformat(),
-                        "platform": "douyin"
-                    })
-
-                    return True
-                else:
-                    logger.warning("❌ 手动登录失败或超时")
-                    return False
+                return "抖音登录等待超时。请重试或检查网络连接。"
             else:
-                # 可能已经登录了
-                if await self.check_login_status(force_check=True):
-                    logger.info("✅ 检测到已登录状态")
-                    return True
-                else:
-                    logger.warning("❌ 未检测到登录状态")
-                    return False
+                # 没有找到登录元素，可能已经登录
+                self.browser.is_logged_in = True
+                await self.save_login_state({
+                    "login_method": "already_logged_in",
+                    "login_time": datetime.now().isoformat(),
+                    "platform": "douyin"
+                })
+                return "已登录抖音账号"
 
         except Exception as e:
-            logger.error(f"手动登录过程中出错: {str(e)}")
-            return False
+            logger.error(f"抖音登录过程出错: {str(e)}")
+            return f"登录过程出错: {str(e)}"
 
     async def _check_if_need_login(self) -> bool:
         """检查是否需要登录"""

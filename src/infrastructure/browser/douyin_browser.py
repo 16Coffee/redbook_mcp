@@ -122,28 +122,118 @@ class DouyinBrowserManager:
             raise
 
     async def close_browser(self):
-        """关闭浏览器"""
+        """关闭浏览器并清理资源"""
+        import os
+        import psutil
+        import subprocess
+        import shutil
+
         try:
+            logger.info("执行抖音浏览器关闭")
+
+            # 1. 保存登录状态（如果已登录）
+            if hasattr(self, 'is_logged_in') and self.is_logged_in:
+                try:
+                    if hasattr(self, 'login_manager'):
+                        await self.login_manager.save_login_state({
+                            "close_reason": "browser_close",
+                            "close_time": datetime.now().isoformat()
+                        })
+                except Exception as e:
+                    logger.warning(f"保存抖音登录状态失败: {str(e)}")
+
+            # 2. 尝试正常关闭页面
             if self.main_page:
-                await self.main_page.close()
-                self.main_page = None
+                try:
+                    await self.main_page.close()
+                    logger.info("抖音主页面正常关闭")
+                except Exception as e:
+                    logger.warning(f"关闭抖音主页面时出错: {str(e)}")
+                finally:
+                    self.main_page = None
 
+            # 3. 关闭浏览器上下文
             if self.context:
-                await self.context.close()
-                self.context = None
+                try:
+                    await self.context.close()
+                    logger.info("抖音浏览器上下文正常关闭")
+                except Exception as e:
+                    logger.warning(f"关闭抖音浏览器上下文时出错: {str(e)}")
+                finally:
+                    self.context = None
 
+            # 4. 关闭浏览器实例
             if self.browser:
-                await self.browser.close()
-                self.browser = None
+                try:
+                    await self.browser.close()
+                    logger.info("抖音浏览器实例正常关闭")
+                except Exception as e:
+                    logger.warning(f"关闭抖音浏览器实例时出错: {str(e)}")
+                finally:
+                    self.browser = None
 
+            # 5. 停止Playwright实例
             if self.playwright:
-                await self.playwright.stop()
-                self.playwright = None
+                try:
+                    await self.playwright.stop()
+                    logger.info("抖音Playwright实例停止")
+                except Exception as e:
+                    logger.warning(f"停止抖音Playwright实例时出错: {str(e)}")
+                finally:
+                    self.playwright = None
 
-            logger.info("抖音浏览器已关闭")
+            # 6. 强制清理浏览器进程（确保完全释放）
+            try:
+                # 查找并终止所有与douyin相关的Chromium进程
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        cmdline = proc.info.get('cmdline', [])
+                        cmdline_str = ' '.join(cmdline) if cmdline else ''
+
+                        if ('chromium' in proc.info['name'].lower() or 'chrome' in proc.info['name'].lower()) and 'douyin_data' in cmdline_str:
+                            logger.info(f"终止剩余的抖音浏览器进程: PID {proc.info['pid']}")
+                            psutil.Process(proc.info['pid']).terminate()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+
+                # 使用系统命令进行最终清理
+                if os.name == 'posix':  # macOS/Linux
+                    subprocess.run(['pkill', '-f', 'chromium.*douyin_data'], stderr=subprocess.PIPE)
+                elif os.name == 'nt':   # Windows
+                    subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'], stderr=subprocess.PIPE)
+            except Exception as e:
+                logger.warning(f"强制清理抖音浏览器进程时出错: {str(e)}")
+
+            # 7. 清理锁文件
+            try:
+                lock_files = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
+                for lock_file in lock_files:
+                    lock_path = self.data_dir / lock_file
+                    if lock_path.exists():
+                        if lock_path.is_file():
+                            lock_path.unlink()
+                        elif lock_path.is_dir():
+                            shutil.rmtree(lock_path)
+                        logger.info(f"清理了抖音{lock_file}文件")
+            except Exception as e:
+                logger.warning(f"清理抖音锁文件时出错: {str(e)}")
+
+            # 重置状态
+            self.is_logged_in = False
+
+            # 额外等待确保资源完全释放
+            await asyncio.sleep(1)
+
+            logger.info("抖音浏览器资源清理完成")
 
         except Exception as e:
             logger.error(f"关闭抖音浏览器失败: {str(e)}")
+            # 即使关闭失败，也要重置状态
+            self.main_page = None
+            self.context = None
+            self.browser = None
+            self.playwright = None
+            self.is_logged_in = False
 
     async def save_cookies(self, file_path: str):
         """保存 cookies"""
