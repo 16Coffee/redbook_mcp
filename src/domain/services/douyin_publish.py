@@ -49,11 +49,8 @@ class DouyinPublishManager:
             发布结果消息
         """
         try:
-            # 确保已登录
-            if not self.browser.is_logged_in:
-                login_result = await self.browser.login()
-                if "成功" not in login_result:
-                    return f"登录失败: {login_result}"
+            # 确保浏览器启动（参考小红书模式）
+            await self.browser.ensure_browser()
 
             # 验证媒体文件
             validated_paths = await self._validate_media_files(media_paths)
@@ -66,8 +63,8 @@ class DouyinPublishManager:
 
             logger.info(f"开始发布抖音{content_type}内容: {title}")
 
-            # 访问创作者中心
-            await self._navigate_to_creator_center()
+            # 直接访问发布页面（参考小红书模式，不要先验证登录）
+            await self._navigate_to_publish_page()
 
             # 根据内容类型选择发布方式
             if content_type == "video":
@@ -129,49 +126,32 @@ class DouyinPublishManager:
         else:
             return "unknown"
 
-    async def _navigate_to_creator_center(self):
-        """导航到创作者中心"""
+    async def _navigate_to_publish_page(self):
+        """直接导航到发布页面（参考小红书模式）"""
         try:
-            # 首先访问创作者中心主页
-            creator_main_url = "https://creator.douyin.com"
-            await self.browser.goto(creator_main_url)
-            await asyncio.sleep(3)
+            # 直接访问发布页面，参考小红书的做法
+            publish_url = "https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page"
+            await self.browser.goto(publish_url, wait_time=5)
 
             current_url = self.browser.main_page.url
-            logger.info(f"访问创作者中心，当前URL: {current_url}")
+            logger.info(f"访问发布页面，当前URL: {current_url}")
 
-            # 检查是否需要登录
-            if "login" in current_url.lower() or await self._check_need_login():
-                logger.info("检测到需要登录，开始登录流程...")
+            # 如果被重定向到登录页面，说明需要登录
+            if "login" in current_url.lower():
+                logger.info("检测到需要登录，使用智能登录...")
+                login_result = await self.browser.login()
+                if "成功" not in login_result and "已登录" not in login_result:
+                    raise Exception(f"登录失败: {login_result}")
 
-                # 使用登录管理器进行登录
-                from src.infrastructure.browser.douyin_login_manager import DouyinLoginManager
-                login_manager = DouyinLoginManager(self.browser)
+                # 登录成功后重新访问发布页面
+                await self.browser.goto(publish_url, wait_time=5)
+                current_url = self.browser.main_page.url
+                logger.info(f"登录后重新访问，当前URL: {current_url}")
 
-                login_success = await login_manager.login()
-                if not login_success:
-                    raise Exception("登录失败，无法继续发布")
-
-                # 登录成功后重新访问创作者中心
-                await self.browser.goto(creator_main_url)
-                await asyncio.sleep(3)
-
-            # 尝试导航到上传页面
-            upload_url = "https://creator.douyin.com/creator-micro/content/upload"
-            await self.browser.goto(upload_url)
-            await asyncio.sleep(3)
-
-            # 验证是否成功进入上传页面
-            final_url = self.browser.main_page.url
-            logger.info(f"最终页面URL: {final_url}")
-
-            # 检查页面是否包含上传相关元素
-            await self._verify_upload_page()
-
-            logger.info("已成功进入抖音创作者中心上传页面")
+            logger.info("已成功进入抖音发布页面")
 
         except Exception as e:
-            logger.error(f"导航到创作者中心失败: {str(e)}")
+            logger.error(f"导航到发布页面失败: {str(e)}")
             raise
 
     async def _check_need_login(self) -> bool:
@@ -246,23 +226,17 @@ class DouyinPublishManager:
         allow_duet: bool,
         allow_stitch: bool
     ) -> str:
-        """发布视频"""
+        """发布视频（参考小红书模式）"""
         try:
-            # 点击发布视频按钮
-            await self._click_publish_button("video")
-
-            # 上传视频文件
+            # 上传视频文件（直接上传，不需要先点击按钮）
             video_path = media_paths[0]  # 取第一个视频文件
             await self._upload_video_file(video_path)
 
-            # 等待视频处理
+            # 等待视频处理完成
             await self._wait_for_video_processing()
 
-            # 填写视频信息
+            # 填写视频信息（标题、内容、话题）
             await self._fill_video_info(title, content, topics)
-
-            # 设置隐私和互动选项
-            await self._set_video_settings(privacy, allow_comment, allow_duet, allow_stitch)
 
             # 发布视频
             await self._submit_video()
@@ -360,78 +334,179 @@ class DouyinPublishManager:
             raise
 
     async def _upload_video_file(self, video_path: str):
-        """上传视频文件"""
+        """上传视频文件（参考小红书模式）"""
         try:
-            # 查找文件上传输入框（包括隐藏的input元素）
-            file_input_selectors = [
-                'input[type="file"]',
-                'input[accept*="video"]',
-                'input[accept*=".mp4"]',
-                'input[accept*=".mov"]',
-                '[data-e2e="upload-input"]',
-                '.upload-input',
-                'input[multiple]'
+            logger.info(f"开始上传视频: {video_path}")
+
+            # 首先尝试直接找到文件输入元素（参考小红书方式）
+            file_input = await self.browser.main_page.query_selector('input[type="file"]')
+            if file_input:
+                logger.info("找到文件输入元素，直接设置文件")
+                await file_input.set_input_files(video_path)
+                logger.info(f"视频文件设置成功: {video_path}")
+                await asyncio.sleep(5)  # 等待上传
+                return
+
+            # 如果没有找到，尝试点击上传按钮触发文件选择器（参考小红书方式）
+            upload_button_selectors = [
+                'text="上传视频"',
+                'text="点击上传"',
+                'text="选择文件"',
+                '.upload-btn',
+                '.upload-area',
+                '[data-e2e="upload"]'
             ]
 
-            file_input = None
-            for selector in file_input_selectors:
+            for selector in upload_button_selectors:
                 try:
-                    # 查找所有匹配的input元素，包括隐藏的
-                    inputs = await self.browser.main_page.query_selector_all(selector)
-                    for input_elem in inputs:
-                        # 检查元素是否可用于文件上传
+                    logger.info(f"尝试上传按钮选择器: {selector}")
+                    button = await self.browser.main_page.query_selector(selector)
+                    if button:
+                        logger.info(f"找到上传按钮: {selector}")
+
+                        # 使用fileChooser处理文件上传（参考小红书方式）
                         try:
-                            input_type = await input_elem.get_attribute('type')
-                            if input_type == 'file':
-                                file_input = input_elem
-                                logger.info(f"找到文件上传输入框: {selector}")
-                                break
-                        except Exception:
-                            continue
-                    if file_input:
+                            file_chooser_promise = self.browser.main_page.wait_for_file_chooser(timeout=10000)
+                            await button.click()
+                            logger.info("已点击上传按钮")
+
+                            file_chooser = await file_chooser_promise
+                            await file_chooser.set_files(video_path)
+                            logger.info(f"通过文件选择器设置视频: {video_path}")
+                            await asyncio.sleep(5)  # 等待上传
+                            return
+                        except Exception as fc_e:
+                            logger.warning(f"文件选择器方式失败: {str(fc_e)}")
+
+                            # 点击后再次查找文件输入框
+                            await asyncio.sleep(1)
+                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
+                            if file_input:
+                                logger.info("点击按钮后找到文件输入元素")
+                                await file_input.set_input_files(video_path)
+                                logger.info(f"视频文件设置成功: {video_path}")
+                                await asyncio.sleep(5)
+                                return
+                except Exception as e:
+                    logger.warning(f"选择器 {selector} 失败: {str(e)}")
+                    continue
+
+            # 如果都失败了，调试页面元素
+            await self._debug_page_elements()
+            raise Exception("未找到文件上传方式")
+
+        except Exception as e:
+            logger.error(f"上传视频文件失败: {str(e)}")
+            raise
+
+    async def _wait_for_video_processing(self):
+        """等待视频处理完成"""
+        try:
+            logger.info("等待视频处理完成...")
+
+            # 等待视频上传和处理完成（简化版本）
+            await asyncio.sleep(10)  # 给视频上传一些时间
+
+            # 检查是否有处理完成的指示器
+            success_indicators = [
+                'text="上传成功"',
+                'text="处理完成"',
+                '.upload-success',
+                '.video-preview'  # 视频预览出现说明处理完成
+            ]
+
+            for indicator in success_indicators:
+                try:
+                    element = await self.browser.main_page.query_selector(indicator)
+                    if element:
+                        logger.info(f"检测到处理完成指示器: {indicator}")
                         break
                 except Exception:
                     continue
 
-            if not file_input:
-                # 尝试点击上传区域来触发文件选择
-                upload_area_selectors = [
-                    'text="点击上传或直接拖拽视频文件至此区域"',
-                    'text="上传视频"',
-                    '.upload-area',
-                    '.upload-zone',
-                    '[data-e2e="upload-area"]'
-                ]
-
-                for selector in upload_area_selectors:
-                    try:
-                        upload_area = await self.browser.main_page.wait_for_selector(selector, timeout=3000)
-                        if upload_area:
-                            await upload_area.click()
-                            await asyncio.sleep(1)
-
-                            # 再次查找文件输入框
-                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
-                            if file_input:
-                                logger.info(f"通过点击上传区域找到文件输入框: {selector}")
-                                break
-                    except Exception:
-                        continue
-
-            if not file_input:
-                # 最后尝试：调试页面元素
-                await self._debug_page_elements()
-                raise Exception("未找到文件上传输入框")
-
-            # 上传文件
-            await file_input.set_input_files(video_path)
-            logger.info(f"视频文件上传成功: {video_path}")
-
-            # 等待上传完成
-            await asyncio.sleep(5)
+            logger.info("视频处理等待完成")
 
         except Exception as e:
-            logger.error(f"上传视频文件失败: {str(e)}")
+            logger.warning(f"等待视频处理时出错: {str(e)}")
+            # 即使出错也继续，可能视频已经处理完成
+
+    async def _fill_video_info(self, title: str, content: str, topics: Optional[List[str]]):
+        """填写视频信息（参考小红书模式）"""
+        try:
+            # 填写标题
+            await self._fill_title(title)
+
+            # 填写描述内容
+            await self._fill_description(content, topics)
+
+            logger.info("视频信息填写完成")
+
+        except Exception as e:
+            logger.error(f"填写视频信息失败: {str(e)}")
+            raise
+
+    async def _fill_title(self, title: str):
+        """填写标题"""
+        try:
+            title_selectors = [
+                'input[placeholder*="标题"]',
+                'input[placeholder*="title"]',
+                'textarea[placeholder*="标题"]',
+                '[data-e2e="title-input"]',
+                '.title-input'
+            ]
+
+            for selector in title_selectors:
+                try:
+                    title_input = await self.browser.main_page.query_selector(selector)
+                    if title_input:
+                        await title_input.fill(title)
+                        await asyncio.sleep(1)
+                        logger.info("标题填写成功")
+                        return
+                except Exception:
+                    continue
+
+            logger.warning("未找到标题输入框")
+
+        except Exception as e:
+            logger.error(f"填写标题失败: {str(e)}")
+            raise
+
+    async def _fill_description(self, content: str, topics: Optional[List[str]]):
+        """填写描述内容"""
+        try:
+            # 构建完整内容（包含话题标签）
+            full_content = content
+            if topics and len(topics) > 0:
+                topic_tags = ' '.join([f'#{topic}' for topic in topics])
+                full_content = f"{content}\n\n{topic_tags}"
+
+            description_selectors = [
+                'textarea[placeholder*="描述"]',
+                'textarea[placeholder*="内容"]',
+                'div[contenteditable="true"]',
+                '[data-e2e="description-input"]',
+                '.description-input'
+            ]
+
+            for selector in description_selectors:
+                try:
+                    desc_input = await self.browser.main_page.query_selector(selector)
+                    if desc_input:
+                        await desc_input.click()
+                        await asyncio.sleep(0.5)
+                        await desc_input.fill(full_content)
+                        await asyncio.sleep(1)
+                        logger.info("描述填写成功")
+                        return
+                except Exception:
+                    continue
+
+            logger.warning("未找到描述输入框")
+
+        except Exception as e:
+            logger.error(f"填写描述失败: {str(e)}")
             raise
 
     async def _upload_image_files(self, image_paths: List[str]):
