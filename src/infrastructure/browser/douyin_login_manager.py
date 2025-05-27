@@ -292,29 +292,29 @@ class DouyinLoginManager:
             current_url = self.browser.main_page.url
             logger.info(f"当前页面URL: {current_url}")
 
-            # 如果URL包含登录相关路径，说明需要登录
-            if "login" in current_url.lower() or "creator.douyin.com" in current_url:
-                logger.info("检测到登录页面，等待用户手动登录...")
+            # 检查是否需要登录
+            need_login = await self._check_if_need_login()
+            if need_login:
+                logger.info("检测到需要登录，等待用户手动登录...")
+                logger.info("请在浏览器中完成登录操作...")
 
-                # 等待用户手动登录（检查URL变化或登录元素消失）
+                # 等待用户手动登录
                 max_wait_time = 300  # 5分钟超时
                 start_time = time.time()
 
                 while time.time() - start_time < max_wait_time:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)
 
                     try:
-                        current_url = self.browser.main_page.url
-
-                        # 检查是否跳转到了主页面或其他非登录页面
-                        if "login" not in current_url.lower():
-                            logger.info("检测到页面跳转，可能已登录")
+                        # 检查是否已经登录成功
+                        if not await self._check_if_need_login():
+                            logger.info("检测到登录成功")
                             break
 
-                        # 检查登录按钮是否消失
-                        login_elements = await self.browser.main_page.query_selector_all('text="登录"')
-                        if len(login_elements) == 0:
-                            logger.info("登录按钮消失，可能已登录")
+                        # 检查URL是否发生了有意义的变化
+                        new_url = self.browser.main_page.url
+                        if new_url != current_url and "login" not in new_url.lower():
+                            logger.info(f"检测到页面跳转: {new_url}")
                             break
 
                     except Exception as e:
@@ -350,6 +350,52 @@ class DouyinLoginManager:
         except Exception as e:
             logger.error(f"手动登录过程中出错: {str(e)}")
             return False
+
+    async def _check_if_need_login(self) -> bool:
+        """检查是否需要登录"""
+        try:
+            # 检查页面中是否有登录相关元素
+            login_indicators = [
+                'text="登录"',
+                'text="我是创作者"',
+                'text="扫码登录"',
+                'text="手机号登录"',
+                'text="验证码登录"',
+                '.login-btn',
+                '.qr-code',
+                'input[name*="login"]',
+                'input[placeholder*="手机号"]',
+                'input[placeholder*="验证码"]'
+            ]
+
+            found_login_elements = 0
+            for selector in login_indicators:
+                try:
+                    elements = await self.browser.main_page.query_selector_all(selector)
+                    if elements:
+                        found_login_elements += 1
+                        logger.debug(f"找到登录元素: {selector}")
+                except Exception:
+                    continue
+
+            # 如果找到多个登录相关元素，说明在登录页面
+            need_login = found_login_elements >= 2
+
+            # 额外检查：查看页面标题
+            try:
+                title = await self.browser.main_page.title()
+                if any(keyword in title for keyword in ["登录", "Login", "创作者"]):
+                    need_login = True
+                    logger.debug(f"页面标题包含登录关键词: {title}")
+            except Exception:
+                pass
+
+            logger.debug(f"登录检查结果: 需要登录={need_login}, 找到登录元素={found_login_elements}")
+            return need_login
+
+        except Exception as e:
+            logger.warning(f"检查登录需求失败: {str(e)}")
+            return True  # 出错时假设需要登录
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取当前会话信息"""
