@@ -52,6 +52,13 @@ class DouyinPublishManager:
             # 确保浏览器启动（参考小红书模式）
             await self.browser.ensure_browser()
 
+            # 先确保登录状态（这是关键！）
+            logger.info("检查并确保登录状态...")
+            login_result = await self.browser.login()
+            if "失败" in login_result:
+                return f"登录失败: {login_result}"
+            logger.info(f"登录状态确认: {login_result}")
+
             # 验证媒体文件
             validated_paths = await self._validate_media_files(media_paths)
             if not validated_paths:
@@ -63,7 +70,7 @@ class DouyinPublishManager:
 
             logger.info(f"开始发布抖音{content_type}内容: {title}")
 
-            # 直接访问发布页面（参考小红书模式，不要先验证登录）
+            # 访问发布页面（现在应该不会被重定向到登录页面）
             await self._navigate_to_publish_page()
 
             # 根据内容类型选择发布方式
@@ -127,26 +134,19 @@ class DouyinPublishManager:
             return "unknown"
 
     async def _navigate_to_publish_page(self):
-        """直接导航到发布页面（参考小红书模式）"""
+        """直接导航到发布页面（已确保登录状态）"""
         try:
-            # 直接访问发布页面，参考小红书的做法
+            # 直接访问发布页面，因为已经确保了登录状态
             publish_url = "https://creator.douyin.com/creator-micro/content/post/video?enter_from=publish_page"
             await self.browser.goto(publish_url, wait_time=5)
 
             current_url = self.browser.main_page.url
             logger.info(f"访问发布页面，当前URL: {current_url}")
 
-            # 如果被重定向到登录页面，说明需要登录
+            # 检查是否仍然被重定向到登录页面（不应该发生）
             if "login" in current_url.lower():
-                logger.info("检测到需要登录，使用智能登录...")
-                login_result = await self.browser.login()
-                if "成功" not in login_result and "已登录" not in login_result:
-                    raise Exception(f"登录失败: {login_result}")
-
-                # 登录成功后重新访问发布页面
-                await self.browser.goto(publish_url, wait_time=5)
-                current_url = self.browser.main_page.url
-                logger.info(f"登录后重新访问，当前URL: {current_url}")
+                logger.warning("尽管已确保登录，仍被重定向到登录页面")
+                raise Exception("登录状态异常，请重新尝试")
 
             logger.info("已成功进入抖音发布页面")
 
