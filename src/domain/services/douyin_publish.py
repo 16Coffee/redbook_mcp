@@ -334,7 +334,7 @@ class DouyinPublishManager:
             raise
 
     async def _upload_video_file(self, video_path: str):
-        """上传视频文件（参考小红书模式）"""
+        """上传视频文件（完全参考小红书模式）"""
         try:
             logger.info(f"开始上传视频: {video_path}")
 
@@ -347,49 +347,96 @@ class DouyinPublishManager:
                 await asyncio.sleep(5)  # 等待上传
                 return
 
-            # 如果没有找到，尝试点击上传按钮触发文件选择器（参考小红书方式）
-            upload_button_selectors = [
-                'text="上传视频"',
-                'text="点击上传"',
-                'text="选择文件"',
-                '.upload-btn',
-                '.upload-area',
-                '[data-e2e="upload"]'
-            ]
+            # 使用JavaScript查找上传元素（完全参考小红书方式）
+            logger.info("使用JavaScript查找视频上传元素...")
+            js_result = await self.browser.main_page.evaluate('''
+                () => {
+                    // 查找包含"上传视频"、"选择视频"等文本的按钮
+                    const textElements = Array.from(document.querySelectorAll('button, a, div, span'));
+                    const videoUploadBtn = textElements.find(el =>
+                        el.textContent && (
+                            el.textContent.includes('上传视频') ||
+                            el.textContent.includes('选择视频') ||
+                            el.textContent.includes('添加视频') ||
+                            el.textContent.includes('点击上传') ||
+                            el.textContent.includes('选择文件')
+                        )
+                    );
 
-            for selector in upload_button_selectors:
-                try:
-                    logger.info(f"尝试上传按钮选择器: {selector}")
-                    button = await self.browser.main_page.query_selector(selector)
-                    if button:
-                        logger.info(f"找到上传按钮: {selector}")
+                    if (videoUploadBtn) {
+                        videoUploadBtn.style.border = '5px solid green';
+                        return {
+                            found: true,
+                            method: 'text',
+                            tag: videoUploadBtn.tagName,
+                            text: videoUploadBtn.textContent.trim()
+                        };
+                    }
 
-                        # 使用fileChooser处理文件上传（参考小红书方式）
+                    // 查找所有文件输入元素
+                    const fileInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+                    if (fileInputs.length > 0) {
+                        fileInputs[0].style.border = '5px solid blue';
+                        return {
+                            found: true,
+                            method: 'input',
+                            tag: fileInputs[0].tagName,
+                            accept: fileInputs[0].accept || 'none'
+                        };
+                    }
+
+                    // 查找上传区域
+                    const uploadAreas = Array.from(document.querySelectorAll('.upload-area, .el-upload, [class*="upload"]'));
+                    if (uploadAreas.length > 0) {
+                        uploadAreas[0].style.border = '5px solid yellow';
+                        return {
+                            found: true,
+                            method: 'area',
+                            tag: uploadAreas[0].tagName,
+                            classes: uploadAreas[0].className
+                        };
+                    }
+
+                    return { found: false };
+                }
+            ''')
+
+            logger.info(f"JavaScript查找视频上传元素结果: {js_result}")
+
+            if js_result.get('found'):
+                # 根据查找结果尝试上传
+                method = js_result.get('method')
+                if method == 'input':
+                    # 直接使用文件输入
+                    file_input = await self.browser.main_page.query_selector('input[type="file"]')
+                    if file_input:
+                        await file_input.set_input_files(video_path)
+                        logger.info(f"通过文件输入设置视频: {video_path}")
+                        await asyncio.sleep(5)
+                        return
+                else:
+                    # 尝试点击按钮或区域
+                    clicked = await self.browser.main_page.evaluate('''
+                        () => {
+                            const highlightedElements = Array.from(document.querySelectorAll('[style*="border: 5px solid"]'));
+                            if (highlightedElements.length > 0) {
+                                highlightedElements[0].click();
+                                return true;
+                            }
+                            return false;
+                        }
+                    ''')
+
+                    if clicked:
+                        logger.info("通过JavaScript成功点击了视频上传元素")
                         try:
-                            file_chooser_promise = self.browser.main_page.wait_for_file_chooser(timeout=10000)
-                            await button.click()
-                            logger.info("已点击上传按钮")
-
-                            file_chooser = await file_chooser_promise
+                            file_chooser = await self.browser.main_page.wait_for_file_chooser(timeout=5000)
                             await file_chooser.set_files(video_path)
-                            logger.info(f"通过文件选择器设置视频: {video_path}")
-                            await asyncio.sleep(5)  # 等待上传
+                            logger.info(f"通过点击设置视频文件: {video_path}")
+                            await asyncio.sleep(5)
                             return
-                        except Exception as fc_e:
-                            logger.warning(f"文件选择器方式失败: {str(fc_e)}")
-
-                            # 点击后再次查找文件输入框
-                            await asyncio.sleep(1)
-                            file_input = await self.browser.main_page.query_selector('input[type="file"]')
-                            if file_input:
-                                logger.info("点击按钮后找到文件输入元素")
-                                await file_input.set_input_files(video_path)
-                                logger.info(f"视频文件设置成功: {video_path}")
-                                await asyncio.sleep(5)
-                                return
-                except Exception as e:
-                    logger.warning(f"选择器 {selector} 失败: {str(e)}")
-                    continue
+                        except Exception as e:
+                            logger.warning(f"点击后等待文件选择器失败: {str(e)}")
 
             # 如果都失败了，调试页面元素
             await self._debug_page_elements()
@@ -446,26 +493,46 @@ class DouyinPublishManager:
             raise
 
     async def _fill_title(self, title: str):
-        """填写标题"""
+        """填写标题（完全参考小红书模式）"""
         try:
-            title_selectors = [
-                'input[placeholder*="标题"]',
-                'input[placeholder*="title"]',
-                'textarea[placeholder*="标题"]',
-                '[data-e2e="title-input"]',
-                '.title-input'
-            ]
+            # 使用小红书的选择器和方法
+            title_input = await self.browser.main_page.query_selector('input[placeholder*="标题"], textarea[placeholder*="标题"]')
+            if title_input:
+                await title_input.click()  # 先点击输入框
+                await asyncio.sleep(0.5)
+                await title_input.type(title)  # 使用type而不是fill
+                await asyncio.sleep(1)
+                logger.info("标题填写成功")
+                return
 
-            for selector in title_selectors:
-                try:
-                    title_input = await self.browser.main_page.query_selector(selector)
-                    if title_input:
-                        await title_input.fill(title)
-                        await asyncio.sleep(1)
-                        logger.info("标题填写成功")
-                        return
-                except Exception:
-                    continue
+            # 如果没找到，使用JavaScript查找
+            logger.info("使用JavaScript查找标题输入框...")
+            js_result = await self.browser.main_page.evaluate(f'''
+                () => {{
+                    const inputs = Array.from(document.querySelectorAll('input, textarea'));
+                    const titleInput = inputs.find(el =>
+                        el.placeholder && (
+                            el.placeholder.includes('标题') ||
+                            el.placeholder.includes('title') ||
+                            el.placeholder.includes('Title')
+                        )
+                    );
+
+                    if (titleInput) {{
+                        titleInput.style.border = '3px solid red';
+                        titleInput.focus();
+                        titleInput.value = "{title}";
+                        titleInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        return {{ success: true, placeholder: titleInput.placeholder }};
+                    }}
+
+                    return {{ success: false }};
+                }}
+            ''')
+
+            if js_result.get('success'):
+                logger.info(f"JavaScript成功填写标题: {js_result.get('placeholder')}")
+                return
 
             logger.warning("未找到标题输入框")
 
@@ -474,34 +541,80 @@ class DouyinPublishManager:
             raise
 
     async def _fill_description(self, content: str, topics: Optional[List[str]]):
-        """填写描述内容"""
+        """填写描述内容（完全参考小红书模式）"""
         try:
+            # 使用小红书的选择器和方法
+            content_input = await self.browser.main_page.query_selector('div[contenteditable="true"], textarea[placeholder*="输入正文"], [role="textbox"]')
+            if content_input:
+                await content_input.click()
+                await asyncio.sleep(0.5)
+
+                # 输入基础内容
+                await content_input.type(content)
+                await asyncio.sleep(0.5)
+
+                # 添加话题标签（在内容末尾）
+                if topics and len(topics) > 0:
+                    await content_input.type('\n\n')  # 换行分隔
+                    logger.info(f"开始添加话题标签，共 {len(topics)} 个")
+
+                    for i, topic in enumerate(topics):
+                        topic_text = f"#{topic}"
+                        logger.info(f"输入话题标签: {topic_text}")
+                        await content_input.type(topic_text)
+                        await asyncio.sleep(2)  # 等待下拉建议出现
+
+                        # 如果不是最后一个话题，添加空格
+                        if i < len(topics) - 1:
+                            await content_input.type(' ')
+                            await asyncio.sleep(0.5)
+
+                    logger.info("话题标签添加完成")
+
+                await asyncio.sleep(1)
+                logger.info("描述填写成功")
+                return
+
+            # 如果没找到，使用JavaScript查找和填写
+            logger.info("使用JavaScript查找描述输入框...")
+
             # 构建完整内容（包含话题标签）
             full_content = content
             if topics and len(topics) > 0:
                 topic_tags = ' '.join([f'#{topic}' for topic in topics])
                 full_content = f"{content}\n\n{topic_tags}"
 
-            description_selectors = [
-                'textarea[placeholder*="描述"]',
-                'textarea[placeholder*="内容"]',
-                'div[contenteditable="true"]',
-                '[data-e2e="description-input"]',
-                '.description-input'
-            ]
+            js_result = await self.browser.main_page.evaluate(f'''
+                () => {{
+                    const textareas = Array.from(document.querySelectorAll('textarea, [contenteditable="true"]'));
+                    const contentArea = textareas.find(el =>
+                        el.placeholder && (
+                            el.placeholder.includes('输入') ||
+                            el.placeholder.includes('描述') ||
+                            el.placeholder.includes('正文') ||
+                            el.placeholder.includes('内容')
+                        )
+                    );
 
-            for selector in description_selectors:
-                try:
-                    desc_input = await self.browser.main_page.query_selector(selector)
-                    if desc_input:
-                        await desc_input.click()
-                        await asyncio.sleep(0.5)
-                        await desc_input.fill(full_content)
-                        await asyncio.sleep(1)
-                        logger.info("描述填写成功")
-                        return
-                except Exception:
-                    continue
+                    if (contentArea) {{
+                        contentArea.style.border = '3px solid blue';
+                        contentArea.focus();
+                        if (contentArea.contentEditable === 'true') {{
+                            contentArea.textContent = "{full_content}";
+                        }} else {{
+                            contentArea.value = "{full_content}";
+                        }}
+                        contentArea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        return {{ success: true, placeholder: contentArea.placeholder || 'contenteditable' }};
+                    }}
+
+                    return {{ success: false }};
+                }}
+            ''')
+
+            if js_result.get('success'):
+                logger.info(f"JavaScript成功填写描述: {js_result.get('placeholder')}")
+                return
 
             logger.warning("未找到描述输入框")
 
