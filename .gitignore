@@ -165,9 +165,10 @@ data/
 logs/
 log/
 
-# 缓存文件
-cache/
-.cache/
+# 缓存文件（排除我们的代码目录）
+/.cache/
+/cache/
+!src/infrastructure/cache/
 
 # 临时文件
 temp/
